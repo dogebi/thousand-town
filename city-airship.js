@@ -2,7 +2,7 @@
  * Local +X is the nose. Four moving searchlights reuse the town's GPU volume batch. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;if(root)root.CityAirship=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
   'use strict';
-  const TAU=Math.PI*2, SIZE={length:72,height:22,width:25,bottom:21}, COPY={title:'千人小镇',subtitle:'N E O N   S K Y',footer:'让每一个梦想 · 发光'};
+  const TAU=Math.PI*2, SIZE={length:72,height:22,width:25,bottom:21}, COPY={title:'大连英博',subtitle:'N E O N   S K Y',footer:'让每一个梦想 · 发光'};
   function plan(city){
     city=city||{};
     const roof=Math.max(0,...(city.buildings||[]).map(b=>(b.floors||0)*(b.floorHeight||6)+22),...(city.places||[]).map(p=>p.height||0));
