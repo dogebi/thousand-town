@@ -58,7 +58,10 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
     '一':'0000000000000000000000000000000000000000000000003ffffc7ffffe7ffffe7ffffe000000000000000000000000000000000000000000000000000000000000000000000000',
     '键':'1c01c03dfffc3ffffc3f79fc7f7ffe78fffe7feffe7fe7fc7ffffc3dfffc7f3ffc7fbffc7ffffc1df9e01dfffc1ffffc1ff9c03fffe03ffffe1bcffe0181fc000000000000000000',
     '三':'0000001ffff81ffff81ffff81ffff80000000000000000000000000ffff00ffff00ffff00000000000000000000000007ffffe7ffffe7ffffe7ffffe000000000000000000000000',
-    '连':'181e003c3e003ffffc1ffffc0ffffc0c7b8000fb803ef3807efffc7efffc3efffc1e03801ffffe1ffffe1ffffe1e03803f03807ffffe7ffffe3bfffe307ffc000000000000000000',
+    '连':'0000000000000c0c001c1e000efff807fff8077ff0003b800073803e7ff03e7ff81e7ff006038006fff806fff806fff80603800f03801fc3843ffffc18fffc103ff8000000000000',
+    '大':'000000000000003800003800003800003800003800003c003ffffc3ffffc1ffff8007c00007e00007e0000f70001e78001e3c007c3e00f81f03f00fc3e0078180018000000000000',
+    '英':'0000000000000183800bdbc03ffff81ffff801c38001bb80003c000ffff00ffff00e3c700e38700e3c703ffffc3ffffc007e0000ff0003e7c03fc3fc3f81fc1c0038000000000000',
+    '博':'0000000000000e03300e03780efffc0efffc0e07803ffff83ffff83ffff80e7ff80e7ff80e7ff80e73f80e20f00efffc0efffc0e38e00e3ce00e1ee00e0be00e03c0000000000000',
     '仪':'07870007a7980ff7bc0ff7bc1ff3fc1ef33c3e78783e78787e7c787e3cf07e3ef07e1fe02e1fe00e0fc00e0fc00e1fe00e7ff80efffe0ffcfe0ff03c0ee018000000000000000000',
     '绘':'0f07800f0fc01e0fe01e1ff03ffef87bfcfc7ff87e7ffffe7ffffc1e7ff41e00003c7ffc7ffffc7ffffc3f9f60001ef03fbcf07ffc787ffffc787ffc007c1c000000000000000000',
     '士':'003c00003c00003c00003c00003c00003c007ffffe7ffffe7ffffe003c00003c00003c00003c00003c00003c00003c001ffff83ffffc3ffffc3ffffc000000000000000000000000',
@@ -69,7 +72,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
   };
   function facadeMessagePlan(city){
     const messages=[];
-    for(const spec of [{id:'t-one',text:'我❤️AI',rows:['我','heart','AI'],colors:['#bce7ff','#ff2847','#bce7ff']},{id:'t-three',text:'千人小镇',rows:['千','人','小','镇'],colors:['#bce7ff','#bce7ff','#bce7ff','#bce7ff']}]){
+    for(const spec of [{id:'t-one',text:'我❤️AI',rows:['我','heart','AI'],colors:['#bce7ff','#ff2847','#bce7ff']},{id:'t-three',text:'大连英博',rows:['大','连','英','博'],colors:['#bce7ff','#bce7ff','#bce7ff','#bce7ff']}]){
       const host=city.buildings.find(b=>b.ledgerId===spec.id);if(!host)continue;
       const height=host.floorHeight||6,cut=host.floors>=15?Math.floor(host.floors*.74):host.floors;
       const rows=spec.rows.length*24+(spec.rows.length-1)*3;
@@ -95,7 +98,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
   let facadeMasks=null;
   function facadeContentFrames(){
     if(facadeMasks)return facadeMasks;
-    facadeMasks=[['like','coin','star'],['一','键','三','连'],['仪','绘','士','BY'],['我','heart','AI'],['千','人','小','镇']].map(glyphs=>{
+    facadeMasks=[['like','coin','star'],['一','键','三','连'],['仪','绘','士','BY'],['我','heart','AI'],['大','连','英','博']].map(glyphs=>{
       const mask=new Uint8Array(24*105);
       glyphs.forEach((glyph,line)=>{for(let y=0;y<24;y++){const bits=parseInt(facadeGlyphs[glyph].slice(y*6,y*6+6),16);
         for(let x=0;x<24;x++)if(bits&(1<<(23-x)))mask[((glyphs.length===3?13:0)+line*27+y)*24+x]=255;
@@ -119,7 +122,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
     return [
       {id:'t-one',mode:3,text:'我❤️AI',tint:'#62b6f0'},
       {id:'t-two',mode:1,text:'点赞·投币·收藏 / 一键三连',tint:'#efb65e'},
-      {id:'t-three',mode:4,text:'千人小镇',tint:'#56b1dc'},
+      {id:'t-three',mode:4,text:'大连英博',tint:'#56b1dc'},
       {id:'t-four',mode:2,text:'仪绘士BY',tint:'#e9aa57'}
     ].flatMap(spec=>{
       const host=city.buildings.find(b=>b.ledgerId===spec.id);if(!host)return [];
