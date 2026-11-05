@@ -1,0 +1,184 @@
+/* 大连town 멀티플레이 UI — 평평한 종이/바다색 톤, 그라디언트 없음 */
+#mp {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: #17323d;
+}
+#mp * { box-sizing: border-box; }
+.mp-btn {
+  appearance: none;
+  border: 1px solid #b9cbd3;
+  background: #f7f3ea;
+  color: #17323d;
+  font: 500 13px/1 inherit;
+  letter-spacing: .01em;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.mp-btn:hover { border-color: #0e4c63; }
+.mp-btn[disabled] { opacity: .5; cursor: default; }
+.mp-btn.primary { background: #0e4c63; border-color: #0e4c63; color: #f6f1e2; }
+.mp-dot { width: 7px; height: 7px; border-radius: 50%; background: #b6c2c7; }
+.mp-dot.on { background: #3f8f6a; }
+
+#mp-hud {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 60;
+  width: 268px;
+  background: #f7f3ea;
+  border: 1px solid #cfd8d2;
+  border-radius: 10px;
+  padding: 10px 12px 11px;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: #17323d;
+  box-shadow: none;
+}
+#mp-hud.hidden, #mp-panel.hidden { display: none; }
+.mp-hud-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.mp-who { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mp-online { font-size: 11.5px; color: #5d737c; white-space: nowrap; }
+.mp-zone {
+  font-size: 11.5px;
+  color: #0e4c63;
+  background: #e6eff1;
+  border: 1px solid #cfd8d2;
+  border-radius: 20px;
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.mp-zone:hover { border-color: #0e4c63; }
+.mp-zone-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.mp-zone-grid button {
+  appearance: none;
+  border: 1px solid #cfd8d2;
+  background: #fffdf8;
+  border-radius: 7px;
+  padding: 9px 3px;
+  font: 500 11px/1.35 inherit;
+  color: #4c6570;
+  cursor: pointer;
+}
+.mp-zone-grid button b { display: block; font-weight: 700; font-size: 11.5px; color: #17323d; }
+.mp-zone-grid button.on { border-color: #0e4c63; background: #e6eff1; }
+.mp-role-group { margin-bottom: 7px; }
+.mp-role-group h4 { margin: 0 0 4px; font-size: 10.5px; font-weight: 600; color: #8a9aa2; letter-spacing: .06em; }
+.mp-log { max-height: 108px; overflow-y: auto; font-size: 12px; line-height: 1.5; margin: 4px 0 6px; color: #2b4652; }
+.mp-line.system { color: #7b8f97; }
+.mp-line b { color: #0e4c63; font-weight: 600; }
+.mp-row { display: flex; gap: 6px; align-items: center; }
+.mp-row input {
+  flex: 1;
+  min-width: 0;
+  font: 12px/1 inherit;
+  padding: 8px 9px;
+  border: 1px solid #cfd8d2;
+  border-radius: 7px;
+  background: #fffdf8;
+  color: #17323d;
+}
+.mp-row input:focus { outline: 2px solid #9dc4d4; outline-offset: -1px; }
+.mp-emoji { display: flex; gap: 4px; margin-top: 6px; }
+.mp-emoji button {
+  appearance: none;
+  border: 1px solid #d6ded9;
+  background: #fffdf8;
+  border-radius: 7px;
+  width: 30px;
+  height: 26px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+.mp-emoji button:hover { border-color: #0e4c63; }
+.mp-tools { display: flex; gap: 6px; margin-top: 7px; }
+.mp-tools .mp-btn { padding: 7px 9px; font-size: 11.5px; flex: 1; justify-content: center; }
+
+#mp-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 40, 50, .28);
+}
+#mp-panel.hidden { display: none; }
+.mp-card {
+  width: 372px;
+  max-width: calc(100vw - 28px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  background: #f7f3ea;
+  border: 1px solid #c6d2cc;
+  border-radius: 12px;
+  padding: 18px 18px 16px;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: #17323d;
+}
+.mp-card h2 { margin: 0 0 2px; font-size: 16px; letter-spacing: .02em; }
+.mp-card p.sub { margin: 0 0 12px; font-size: 11.5px; color: #6b8089; line-height: 1.5; }
+.mp-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.mp-tabs button {
+  flex: 1;
+  appearance: none;
+  border: 1px solid #cfd8d2;
+  background: #fffdf8;
+  padding: 8px 0;
+  border-radius: 7px;
+  font: 600 12.5px/1 inherit;
+  color: #58707a;
+  cursor: pointer;
+}
+.mp-tabs button.on { background: #0e4c63; border-color: #0e4c63; color: #f6f1e2; }
+.mp-field { margin-bottom: 9px; }
+.mp-field label { display: block; font-size: 11.5px; color: #5d737c; margin-bottom: 4px; }
+.mp-field input {
+  width: 100%;
+  font: 13px/1 inherit;
+  padding: 10px 11px;
+  border: 1px solid #cfd8d2;
+  border-radius: 7px;
+  background: #fffdf8;
+  color: #17323d;
+}
+.mp-field input:focus { outline: 2px solid #9dc4d4; outline-offset: -1px; }
+.mp-label { font-size: 11.5px; color: #5d737c; margin: 11px 0 5px; }
+.mp-profs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.mp-profs button {
+  appearance: none;
+  border: 1px solid #cfd8d2;
+  background: #fffdf8;
+  border-radius: 7px;
+  padding: 7px 2px;
+  font: 500 11.5px/1.25 inherit;
+  color: #4c6570;
+  cursor: pointer;
+}
+.mp-profs button.on { border-color: #0e4c63; background: #e6eff1; color: #0e4c63; font-weight: 700; }
+.mp-colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.mp-colors button {
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.mp-colors button.on { border-color: #17323d; }
+.mp-error { min-height: 15px; font-size: 11.5px; color: #b04a3c; margin: 8px 0 2px; line-height: 1.45; }
+.mp-actions { display: flex; gap: 7px; margin-top: 6px; }
+.mp-actions .mp-btn { flex: 1; justify-content: center; padding: 11px 10px; }
+.mp-foot { margin-top: 10px; font-size: 11px; color: #8296a0; line-height: 1.5; }

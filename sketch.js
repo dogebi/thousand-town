@@ -2637,6 +2637,10 @@
     seekDay:(minute,day)=>setSimTime({minute,day}),setSimTime,observe,
     setLayout:next=>applyLayout(CityLayout.normalize(next)),
     buildingAnchors:id=>bindings.locate(id),
+    // 접속자 아바타가 씬에 붙을 수 있도록 최소한의 창구만 엽니다(읽기 전용).
+    scene:()=>physicalScene?physicalScene.scene:null,
+    camera:()=>physicalScene?physicalScene.camera:null,
+    stageRect:()=>{const r=$('stage').getBoundingClientRect();return {x:r.left,y:r.top,width:r.width,height:r.height};},
     buildingScreenPoint:id=>physicalScene&&physicalScene.projectBuilding(id,sketch.width,sketch.height),
     townState:()=>{const v=refreshTown();return JSON.parse(JSON.stringify({...v,demand:undefined,proxyCounts:CityLife.countPeople(CityLife.sample(life,state.daySeconds,v.demand))}));},
     exportSnapshot:()=>CityPlanSnapshots.serialize(currentSnapshot()),

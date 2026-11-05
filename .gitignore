@@ -1,2 +1,7 @@
 node_modules/
 .DS_Store
+
+# 大连town 서버 — 비밀값·DB·의존성은 절대 커밋하지 않습니다
+server/.env
+server/data/
+server/node_modules/
