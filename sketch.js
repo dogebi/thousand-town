@@ -2103,7 +2103,7 @@
     canvas.toBlob(blob=>{
       if(!blob)return;
       const url=URL.createObjectURL(blob),a=document.createElement('a');
-      a.href=url;a.download=`千人小镇-V4-日常-${city.seed}.png`;a.click();
+      a.href=url;a.download=`大连town-V4-日常-${city.seed}.png`;a.click();
       setTimeout(()=>URL.revokeObjectURL(url),2000);
     },'image/png');
   }

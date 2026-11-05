@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="大连town">
+  <title>大连town</title>
+  <rect width="64" height="64" rx="14" fill="#0E4C63"/>
+  <circle cx="52" cy="12" r="4.6" fill="#FFD08A"/>
+  <g fill="none" stroke="#F6F1E2" stroke-width="8.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 21H45"/>
+    <path d="M31 13V47.5"/>
+    <path d="M31 30 15.5 51"/>
+    <path d="M31 30 46.5 51"/>
+  </g>
+</svg>

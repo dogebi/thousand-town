@@ -1,8 +1,8 @@
-# 千人小镇 · Thousand Town
+# 大连town · Thousand Town
 
 一座住着 1000 位居民的温暖现代社区，在浏览器里实时运转——校门的早晨、通勤的公交、河岸的晚饭。走近一栋楼，看看谁在这里。
 
-在线版：<https://yihuishi.com/demos/thousand-town/>（[仪绘士 · 画境长廊](https://yihuishi.com) 作品之一）
+在线版：<https://dogebi.github.io/thousand-town/> · 原作：<https://yihuishi.com/demos/thousand-town/>（[仪绘士 · 画境长廊](https://yihuishi.com) 作品之一）
 
 ## 运行
 
