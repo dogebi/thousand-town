@@ -34,12 +34,12 @@ def build(with_sun: bool) -> Image.Image:
         d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=SUN + (255,))
 
     # 大: the horizontal bar is what tells 大 apart from 人/个 at small sizes.
-    w = int(8.6 * UNIT)
+    w = int(7.8 * UNIT)
     strokes = [
-        pts((17.0, 21.0), (45.0, 21.0)),          # horizontal
-        pts((31.0, 13.0), (31.0, 47.5)),          # vertical
-        pts((31.0, 30.0), (15.5, 51.0)),          # left leg
-        pts((31.0, 30.0), (46.5, 51.0)),          # right leg
+        pts((18.0, 22.5), (44.0, 22.5)),          # horizontal
+        pts((31.0, 12.0), (31.0, 30.0)),          # vertical
+        pts((31.0, 24.0), (14.5, 51.5)),          # left leg
+        pts((31.0, 24.0), (47.5, 51.5)),          # right leg
     ]
     for line in strokes:
         d.line(line, fill=GLYPH + (255,), width=w, joint="curve")
