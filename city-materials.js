@@ -393,6 +393,10 @@
       material.uniformsNeedUpdate = true;
     };
     var disposed = false, request = null, retryTimer = null, attempts = 0;
+    // 2K first: the 6000x3000 original decodes to ~96 MB of VRAM for a background
+    // dome. WebP is ~280 KB, JPEG is the compatibility step, the original is last.
+    var galaxySources = ['assets/sky-2k.webp', 'assets/sky-2k.jpg', 'assets/eso-milky-way.jpg'];
+    var galaxySource = 0;
     function loadGalaxy() {
       retryTimer = null;
       if (disposed || typeof root.Image !== 'function') return;
@@ -409,10 +413,28 @@
       image.onerror = function () {
         if (disposed || request !== image) return;
         request = null; image.onload = null; image.onerror = null;
-        if (attempts < 3 && typeof root.setTimeout === 'function')
-          retryTimer = root.setTimeout(loadGalaxy, attempts * 500);
+        // Walk the source list once (webp -> jpg -> original), then retry with backoff.
+        if (galaxySource < galaxySources.length - 1) {
+          galaxySource++;
+          retryTimer = root.setTimeout(loadGalaxy, 0);
+          return;
+        }
+        if (attempts < galaxySources.length + 3 && typeof root.setTimeout === 'function')
+          retryTimer = root.setTimeout(loadGalaxy, 500 * Math.max(1, attempts - galaxySources.length + 1));
       };
-      image.src = 'assets/eso-milky-way.jpg';
+      image.src = galaxySources[galaxySource];
+    }
+    // The galaxy only shows after dusk; keep 280 KB off the first-paint critical path.
+    function scheduleGalaxy() {
+      if (typeof root.requestIdleCallback === 'function') {
+        root.requestIdleCallback(function () {
+          if (!disposed && !request && !retryTimer && uniforms.galaxyReady.value === 0) loadGalaxy();
+        }, { timeout: 2500 });
+      } else if (typeof root.setTimeout === 'function') {
+        retryTimer = root.setTimeout(loadGalaxy, 1200);
+      } else {
+        loadGalaxy();
+      }
     }
     function update(frame) {
       if (disposed) return;
@@ -425,7 +447,7 @@
       uniforms.sunDirection.value.set(frame.sunDirection.x, frame.sunDirection.y, frame.sunDirection.z);
       uniforms.moonDirection.value.set(frame.moonDirection.x, frame.moonDirection.y, frame.moonDirection.z);
     }
-    update(skyState()); loadGalaxy();
+    update(skyState()); scheduleGalaxy();
     return { mesh: mesh, pattern: pattern, update: update, dispose: function () {
       if (disposed) return; disposed = true;
       if (retryTimer !== null) root.clearTimeout(retryTimer);

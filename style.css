@@ -404,3 +404,50 @@ html[data-sky="dark"] .joy-knob { background: rgba(238, 246, 248, .92); border-c
 .fps-hint { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); z-index: 14; padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; background: rgba(251, 253, 255, .88); backdrop-filter: blur(6px); font: 600 10.5px/1 inherit; letter-spacing: .06em; color: #33566b; pointer-events: none; }
 body.ui-hidden .fps-hint { display: none; }
 @media (max-width: 760px) { .joystick { left: 12px; bottom: 12px; } .joy-base { width: 96px; height: 96px; } .joy-base::after { inset: 27px; } }
+
+/* ── 街上的人：hover 标签 · 选中卡片 · 跟随（2026-11-05） ───────────────── */
+.person-hint {
+  position: absolute; z-index: 4; transform: translate(-50%, -160%);
+  padding: 4px 8px; border: 1px solid var(--line); border-radius: 2px;
+  background: #fbfdff; color: var(--ink); font-size: 11px; line-height: 1.2;
+  letter-spacing: .02em; white-space: nowrap; pointer-events: none;
+}
+.person-hint[hidden] { display: none; }
+#stage.is-over-person canvas { cursor: pointer; }
+.person-card {
+  position: absolute; right: 20px; bottom: 62px; z-index: 6; width: 224px;
+  padding: 11px 13px 12px; border: 1px solid var(--line); border-radius: 2px;
+  background: #fbfdff; text-align: left;
+}
+.person-card[hidden] { display: none; }
+.person-card.is-open { display: block; }
+.person-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.person-card-eyebrow { color: var(--muted); font: 9px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; }
+.person-card-head button { width: 20px; height: 20px; border: 1px solid var(--line); border-radius: 2px; color: var(--muted); font-size: 13px; line-height: 1; }
+.person-card-head button:hover { border-color: var(--accent); color: var(--accent); }
+.person-card h3 { margin: 8px 0 4px; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+.person-card-meta { margin: 0 0 6px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.person-card-id { margin: 0; color: #8ba2b1; font: 9px/1.4 "SFMono-Regular", Consolas, monospace; letter-spacing: .06em; }
+.person-card-hint { margin: 5px 0 0; color: #9db0bd; font-size: 9.5px; line-height: 1.5; }
+.person-card-actions { display: flex; gap: 6px; margin-top: 10px; }
+.person-card-actions .view-button { flex: 1 1 auto; padding: 6px 8px; font-size: 11px; border: 1px solid var(--line); border-radius: 2px; color: var(--accent); }
+.person-card-actions .view-button:hover { border-color: var(--accent); background: #eef6f8; }
+@media (max-width: 760px) {
+  .person-card { right: 12px; left: 12px; bottom: 54px; width: auto; }
+  .person-hint { font-size: 10px; }
+}
+
+/* 选中的人说的话：跟随他移动的小气泡（2026-11-05） */
+.person-voice {
+  position: absolute; z-index: 5; transform: translate(-50%, -190%);
+  max-width: 150px; padding: 4px 7px; border: 1px solid var(--line);
+  background: #fffef9; color: #3d5666; font-size: 10.5px; line-height: 1.35;
+  letter-spacing: .01em; white-space: nowrap; pointer-events: none;
+}
+.person-voice::after {
+  content: ""; position: absolute; left: 50%; bottom: -4px; width: 6px; height: 6px;
+  margin-left: -3px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  background: #fffef9; transform: rotate(45deg);
+}
+.person-voice[hidden] { display: none; }
+.person-card-actions .person-step { flex: 0 0 26px; padding: 6px 0; font-size: 13px; line-height: 1; }

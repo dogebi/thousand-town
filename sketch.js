@@ -111,7 +111,7 @@
   const startDay=Number.isSafeInteger(requestedDay)&&requestedDay>0?requestedDay:1;
   const startMinute=requestedMinute!==null&&/^\d{1,4}$/.test(requestedMinute)?Math.min(1439,Number(requestedMinute)):DAY_START_MINUTE;
   const state = {time:0,droneShowStart:0,paused:reducedMotion,loop:false,orbit:false,...VIEW_PRESETS.home,panX:0,panY:0,cameraX:0,cameraY:0,cameraZ:0,cameraYaw:0,cameraPitch:0,flyTarget:null,focusBuilding:false,focusFacility:null,
-    daySeconds:((startDay-1)*1440+startMinute)*CityDailyClock.SECONDS_PER_SIM_MINUTE,observation:null};
+    daySeconds:((startDay-1)*1440+startMinute)*CityDailyClock.SECONDS_PER_SIM_MINUTE,observation:null,focusPerson:null};
   function dayClock(){
     const minute=CityDailyClock.minuteOfDay(state.daySeconds),day=CityDailyClock.dayIndex(state.daySeconds);
     const dow=CityDailyClock.dow(day),dayType=CityDailyClock.dayType(day);
@@ -520,7 +520,7 @@
   }
   function resetNavigation(){
     if(physicalScene)physicalScene.clearZoomAnchor();
-    state.cameraX=0;state.cameraY=0;state.cameraZ=0;state.cameraYaw=0;state.cameraPitch=0;state.panX=0;state.panY=0;state.flyTarget=null;state.focusAirship=false;resetHeldKeys();
+    state.cameraX=0;state.cameraY=0;state.cameraZ=0;state.cameraYaw=0;state.cameraPitch=0;state.panX=0;state.panY=0;state.flyTarget=null;state.focusAirship=false;state.followPoint=null;state.zoomBeforeFollow=null;state.pitchBeforeFollow=null;resetHeldKeys();
   }
   document.addEventListener('keydown',e=>{
     if(e.code==='Escape'){resetHeldKeys();return;}
@@ -1663,7 +1663,31 @@
   function renderTo(context,w,h) {
     refreshTown();
     if(state.focusAirship){const ship=airshipState();if(ship)state.flyTarget={x:ship.x,y:ship.y,z:ship.z};}
+    // Follow mode: the anchor tracks the selected street person every frame. The
+    // camera frames a small box around them (observationBounds) rather than using
+    // flyTarget — flyTarget parks the camera at the town overview distance, which
+    // made "follow" look identical to the default view.
+    if(state.focusPerson&&physicalScene){
+      const pos=physicalScene.personPosition(state.focusPerson);
+      if(pos)state.followPoint=pos;
+      else{
+        // The person left the scene (rode a bus, went indoors) — release the camera
+        // and put the card back to its default state.
+        stopFollow();
+        const stopBtn=$('person-stop'),followBtn=$('person-follow');
+        if(stopBtn&&!stopBtn.hidden){stopBtn.hidden=true;if(followBtn)followBtn.hidden=false;}
+        // Say why the camera let go instead of silently snapping back to the town view.
+        const meta=$('person-meta');
+        if(meta&&personSelected)meta.textContent='这个人进楼了 · 已自动回到街区视角';
+      }
+    }
     state.observationBounds=state.observation?observationBounds(state.observation):null;
+    // Following a person: a tight box around them. Zoom then sets how close the
+    // street view sits (see followPerson).
+    if(state.focusPerson&&!state.observation&&state.followPoint){
+      const p=state.followPoint;
+      state.observationBounds={x:p.x,z:p.z,w:8,d:8,height:6};
+    }
     if(physicalScene){projection(w,h);return physicalScene.render(context,w,h,state,settings,view,context===sketch.drawingContext);}
     const old=ctx;ctx=context;
     canvasLetterSigns.length=0;
@@ -2274,7 +2298,10 @@
         return;
       }
       if(pointers.size>0)return;
-      if(e.type==='pointerup'&&dragging&&!moved&&physicalScene&&!layoutEditing){const rect=stage.getBoundingClientRect();const id=physicalScene.pickBuilding(e.clientX-rect.left,e.clientY-rect.top,rect.width,rect.height);if(id){selectedBuilding=id;selectedResident=null;residentMode='present';lastPanelKey='';updateUI(true);}}dragging=null;stage.classList.remove('is-dragging');
+      if(e.type==='pointerup'&&dragging&&!moved&&physicalScene&&!layoutEditing){const rect=stage.getBoundingClientRect();
+        const person=physicalScene.pickPerson(e.clientX-rect.left,e.clientY-rect.top,rect.width,rect.height);
+        if(person){selectPerson(person);dragging=null;stage.classList.remove('is-dragging');return;}
+        const id=physicalScene.pickBuilding(e.clientX-rect.left,e.clientY-rect.top,rect.width,rect.height);if(id){selectedBuilding=id;selectedResident=null;residentMode='present';lastPanelKey='';updateUI(true);}else if(personSelected){clearPerson();}}dragging=null;stage.classList.remove('is-dragging');
     };
     stage.addEventListener('pointerup',release);stage.addEventListener('pointercancel',release);stage.addEventListener('lostpointercapture',release);
     stage.addEventListener('wheel',e=>{
@@ -2283,9 +2310,254 @@
       const box=stage.getBoundingClientRect();
       zoomAt(Math.exp(-e.deltaY*.001),e.clientX-box.left,e.clientY-box.top,box.width,box.height);
     },{passive:false});
+    bindPeople(pointers);
   }
 
-  new p5(p=>{
+  // ── Blender GLB data: fetched after the first frame (2026-11-05) ────────────
+  // The six assets/blender-*.js files are ~1.15 MB of pure data. They used to sit in
+  // the <script> chain, so the town could not paint until the last one had downloaded
+  // and parsed. Now the procedural town paints first, the data streams in afterwards
+  // in parallel, and the detail pass swaps in when it lands (missing data simply keeps
+  // the procedural buildings).
+  const BLENDER_DATA_FILES=['./assets/blender-district.js','./assets/blender-landscape.js',
+    './assets/blender-civic.js','./assets/blender-hospital-room.js',
+    './assets/blender-amusement.js','./assets/blender-housing.js'];
+  let blenderDataPromise=null, blenderRefineStarted=false;
+  function loadBlenderData(){
+    if(blenderDataPromise)return blenderDataPromise;
+    blenderDataPromise=Promise.all(BLENDER_DATA_FILES.map(src=>new Promise(resolve=>{
+      const el=document.createElement('script');
+      el.src=src;el.async=true;
+      el.onload=()=>resolve({src,ok:true});
+      el.onerror=()=>resolve({src,ok:false});
+      document.head.appendChild(el);
+    })));
+    return blenderDataPromise;
+  }
+  function refineScene(){
+    if(blenderRefineStarted)return;
+    blenderRefineStarted=true;
+    const buildingAssets=window.CityDistrict||window.CityBlender;
+    if(!physicalScene||!buildingAssets)return;
+    loadBlenderData()
+      .then(()=>Promise.allSettled([buildingAssets.load(),CityHousing.load()]))
+      .then(results=>{
+        if(!physicalScene)return;
+        physicalScene.rebuild(city,life,town.residents);refreshTown(true);frameTime=performance.now();
+        if(results[0].status==='fulfilled'){
+          $('blender-status').textContent=city.buildings.length+' 组已就绪';$('blender-toggle').disabled=false;$('blender-focus').disabled=false;
+          document.documentElement.dataset.blenderReady='true';
+        }else{$('blender-status').textContent='使用基础楼体';console.warn('District assets unavailable; keeping procedural buildings.',results[0].reason);}
+        if(results[1].status==='fulfilled'){
+          $('housing-blender-status').textContent='四类住宅 · Blender 精修';$('housing-blender-toggle').disabled=false;
+          document.documentElement.dataset.refinedHousingReady='true';
+        }else{$('housing-blender-status').textContent='使用原住宅模型';document.documentElement.dataset.refinedHousingReady='fallback';console.warn('Housing assets unavailable; keeping procedural housing.',results[1].reason);}
+        if(settings.solarShow){state.time=city.duration;state.droneShowStart=state.time;updateDroneControls();chooseView('solar');pause(reducedMotion);}
+        else if(new URLSearchParams(location.search).get('sample')==='blender')focusBlender();
+        else if(new URLSearchParams(location.search).get('sample')==='district'){state.time=city.duration;pause(true);chooseView(layoutEditing?'top':'home');}
+      });
+  }
+
+  // p5 (954 KB) was only supplying a canvas, a 2D context and a frame clock.
+  // This replaces it: the WebGL canvas is what users see, and the 2D context is
+  // used solely by the non-WebGL fallback renderer.
+  function createCanvasApp(factory){
+    let elt=null,ctx=null,density=1,frameMs=1000/60,lastTick=0,raf=0,running=false,lastDraw=0;
+    const api={
+      width:1,height:1,drawingContext:null,deltaTime:16,
+      createCanvas(w,h){
+        elt=document.createElement('canvas');document.body.appendChild(elt);
+        ctx=elt.getContext('2d');api.drawingContext=ctx;
+        apply(w,h);
+        return {elt,parent(node){if(node&&elt.parentNode!==node)node.appendChild(elt);return elt;}};
+      },
+      pixelDensity(d){density=Math.max(1,Math.min(2,Number(d)||1));if(elt)apply(api.width,api.height);},
+      frameRate(n){const v=Number(n);if(v>0)frameMs=1000/v;},
+      resizeCanvas(w,h){apply(w,h);},
+      noLoop(){running=false;if(raf)cancelAnimationFrame(raf);raf=0;},
+      loop(){if(running)return;running=true;lastTick=0;raf=requestAnimationFrame(tick);}
+    };
+    function apply(w,h){
+      w=Math.max(1,Math.round(w||1));h=Math.max(1,Math.round(h||1));
+      api.width=w;api.height=h;
+      elt.width=Math.round(w*density);elt.height=Math.round(h*density);
+      elt.style.width=w+'px';elt.style.height=h+'px';
+      if(ctx)ctx.setTransform(density,0,0,density,0,0);
+    }
+    function tick(t){
+      if(!running)return;
+      raf=requestAnimationFrame(tick);
+      api.deltaTime=lastTick?Math.min(80,t-lastTick):16;lastTick=t;
+      if(t-lastDraw<frameMs-.6)return;
+      lastDraw=t;
+      if(api.draw)api.draw();
+    }
+    factory(api);
+    if(api.setup)api.setup();
+    running=true;raf=requestAnimationFrame(tick);
+    return api;
+  }
+
+  // ── street people: hover label, selection, follow (2026-11-05) ──────────────
+  const PERSON_KIND_LABELS={walker:'散步的居民',commuter:'赶路的通勤者',jogger:'慢跑的居民',shopper:'逛街的居民',
+    buyer:'在摊前挑东西的人',caller:'停下来打电话的人',ferris:'摩天轮上的乘客',waiter:'排队等候的居民',
+    'taxi-waiter':'等出租车的居民',crosser:'过马路的居民',vendor:'看摊的摊主',bicycle:'骑车经过的居民',
+    ebike:'骑电动车的人',motorcycle:'骑摩托的人'};
+  let personSelected=null;
+  // Where the follow camera sits: 1.8 puts the walker at roughly a quarter of the
+  // viewport height, and the low pitch keeps the street in frame rather than roofs.
+  const FOLLOW_ZOOM=1.8, FOLLOW_PITCH=.46;
+  const personLabel=p=>(p.role&&ROLE_LABELS[p.role])||PERSON_KIND_LABELS[p.kind]||'街上的居民';
+  const PERSON_ACTIVITY_LABELS={walking:'步行中',leisure:'休闲活动',football:'踢球',track:'跑道慢跑',
+    shopper:'逛街',buyer:'挑选商品','door-visit':'进店办事',caller:'打电话',['school-arrival']:'上学到校',
+    ferris:'坐摩天轮',waiter:'排队等候','taxi-waiter':'等出租车',crosser:'过马路',vendor:'摆摊',cycling:'骑行'};
+  function personCardMeta(p){
+    const bits=[];
+    const dest=p.ledgerId?buildingLabel(p.ledgerId):(p.destination?String(p.destination):'');
+    if(dest&&dest!=='未知地点')bits.push('前往 '+dest);
+    let act=PERSON_ACTIVITY_LABELS[p.activity]||null;
+    if(p.activity==='leisure')act=p.kind==='jogger'?'慢跑中':p.kind==='walker'?'散步中':'休闲活动';
+    if(act)bits.push(act);
+    return bits.join(' · ')||'此刻在街上';
+  }
+  function hidePersonHint(){
+    const hint=$('person-hint');if(hint)hint.hidden=true;
+    const stage=$('stage');if(stage)stage.classList.remove('is-over-person');
+    if(physicalScene)physicalScene.setHoveredPerson(null);
+  }
+  function selectPerson(p){
+    personSelected=p;
+    hidePersonHint();
+    if(physicalScene){physicalScene.setSelectedPerson(p.id);physicalScene.setHoveredPerson(null);}
+    const card=$('person-card');if(!card)return;
+    card.hidden=false;
+    $('person-title').textContent=personLabel(p);
+    $('person-meta').textContent=personCardMeta(p);
+    $('person-kind').textContent=String(p.id)+(p.kind?' · '+p.kind:'');
+    $('person-follow').hidden=state.focusPerson===p.id;
+    $('person-stop').hidden=state.focusPerson!==p.id;
+    card.classList.add('is-open');
+  }
+  function clearPerson(){
+    personSelected=null;
+    if(physicalScene)physicalScene.setSelectedPerson(null);
+    const card=$('person-card');if(card){card.hidden=true;card.classList.remove('is-open');}
+    const voice=$('person-voice');if(voice)voice.hidden=true;
+    stopFollow();
+  }
+  function followPerson(id){
+    if(!physicalScene||id==null)return;
+    const pos=physicalScene.personPosition(id);if(!pos)return;
+    if(state.focusPerson!==id&&state.zoomBeforeFollow==null){state.zoomBeforeFollow=state.zoom;state.pitchBeforeFollow=state.pitch;}
+    state.focusPerson=id;state.focusAirship=false;targets=null;state.observation=null;
+    state.followPoint=pos;
+    // Street level: a bit over the person's head, close enough to read the walk cycle.
+    state.zoom=FOLLOW_ZOOM;
+    if(state.pitch>FOLLOW_PITCH)state.pitch=FOLLOW_PITCH;
+    physicalScene.setSelectedPerson(id);physicalScene.invalidate();updateUI(true);
+  }
+  // Leaving follow restores the zoom and pitch the viewer had before, so the town does
+  // not stay stuck at street level after a five-second look at one pedestrian.
+  function stopFollow(){
+    if(!state.focusPerson)return;
+    state.focusPerson=null;state.followPoint=null;state.flyTarget=null;
+    if(state.zoomBeforeFollow!=null){state.zoom=state.zoomBeforeFollow;state.zoomBeforeFollow=null;}
+    if(state.pitchBeforeFollow!=null){state.pitch=state.pitchBeforeFollow;state.pitchBeforeFollow=null;}
+    if(physicalScene)physicalScene.invalidate();
+    updateUI(true);
+  }
+  // ── what this person is saying right now ────────────────────────────────────
+  // A bubble that rides along with the selection. Lines are keyed to the sampled
+  // kind and rotate with the town clock (no Math.random in the render path).
+  const PERSON_VOICE_LINES={
+    waiter:['车应该快来了。','再等两分钟。','今天排队的人不多。'],
+    'taxi-waiter':['打车去河边。','这个点不太好叫车。'],
+    walker:['河边的风比楼里凉。','慢慢走，不着急。','树影刚好。'],
+    jogger:['再跑一圈。','今天配速不错。'],
+    shopper:['先看看这家。','这家的东西很新鲜。'],
+    buyer:['这个多少钱？','再挑一个。'],
+    caller:['我在路上了。','马上到，别急。'],
+    crosser:['等绿灯。','这边走快一点。'],
+    vendor:['刚出炉的，热的。','今天的货不错。'],
+    ferris:['从这里能看到整条河。','再转一圈就下来。'],
+    bicycle:['借过一下。','今天骑车上班。'],
+    ebike:['前面路口右转。'],
+    motorcycle:['赶时间，先走了。'],
+    commuter:['要迟到了。','今天会议提前。']
+  };
+  function personVoiceText(p){
+    const lines=PERSON_VOICE_LINES[p.kind]||['今天天气不错。','这里很安静。'];
+    let h=0;const id=String(p.id||'');
+    for(let i=0;i<id.length;i++)h=(h*31+id.charCodeAt(i))>>>0;
+    const bucket=Math.floor((state.daySeconds||0)/45);
+    return lines[(h+bucket)%lines.length];
+  }
+  function updatePersonVoice(){
+    const el=$('person-voice');if(!el)return;
+    if(!personSelected||!physicalScene||!sketch){if(!el.hidden)el.hidden=true;return;}
+    const point=physicalScene.personScreenPoint(personSelected.id,sketch.width,sketch.height);
+    if(!point){if(!el.hidden)el.hidden=true;return;}
+    const text=personVoiceText(personSelected);
+    if(el.textContent!==text)el.textContent=text;
+    el.hidden=false;
+    el.style.left=Math.round(point.x)+'px';
+    el.style.top=Math.round(point.y)+'px';
+  }
+  function cyclePerson(step){
+    if(!physicalScene||!sketch)return null;
+    const list=physicalScene.peopleOnScreen(sketch.width,sketch.height);
+    if(!list.length)return null;
+    let index=personSelected?list.findIndex(item=>item.id===String(personSelected.id)):-1;
+    index=index<0?(step>0?0:list.length-1):(index+step+list.length)%list.length;
+    const next=list[index];
+    const hit=physicalScene.pickPerson(next.x,next.y,sketch.width,sketch.height);
+    if(!hit)return null;
+    selectPerson(hit);
+    return hit.id;
+  }
+  function bindPeople(dragState){
+    const stage=$('stage');
+    stage.addEventListener('pointermove',e=>{
+      if(!physicalScene||layoutEditing||(dragState&&dragState.size>0)||e.pointerType==='touch'){hidePersonHint();return;}
+      const box=stage.getBoundingClientRect();
+      const hit=physicalScene.pickPerson(e.clientX-box.left,e.clientY-box.top,box.width,box.height);
+      const hint=$('person-hint');if(!hint)return;
+      if(!hit){hidePersonHint();return;}
+      hint.hidden=false;hint.textContent=personLabel(hit);
+      hint.style.left=Math.round(hit.screenX)+'px';hint.style.top=Math.round(hit.screenY)+'px';
+      stage.classList.add('is-over-person');
+      physicalScene.setHoveredPerson(hit.id);
+    });
+    stage.addEventListener('pointerleave',hidePersonHint);
+    // Double-click skips the card detour: select and start following in one gesture.
+    stage.addEventListener('dblclick',e=>{
+      if(!physicalScene||layoutEditing)return;
+      const box=stage.getBoundingClientRect();
+      const hit=physicalScene.pickPerson(e.clientX-box.left,e.clientY-box.top,box.width,box.height);
+      if(!hit)return;
+      selectPerson(hit);followPerson(hit.id);selectPerson(hit);
+    });
+    const close=$('person-close');if(close)close.onclick=clearPerson;
+    const follow=$('person-follow');
+    if(follow)follow.onclick=()=>{if(personSelected){followPerson(personSelected.id);selectPerson(personSelected);}};
+    const stop=$('person-stop');
+    if(stop)stop.onclick=()=>{stopFollow();if(personSelected)selectPerson(personSelected);};
+    const prev=$('person-prev');if(prev)prev.onclick=()=>cyclePerson(-1);
+    const next=$('person-next');if(next)next.onclick=()=>cyclePerson(1);
+    document.addEventListener('keydown',e=>{
+      if(e.target&&/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))return;
+      if(e.key==='Escape'&&personSelected){clearPerson();}
+      if((e.key==='f'||e.key==='F')&&personSelected&&state.focusPerson!==personSelected.id&&document.activeElement===document.body){
+        followPerson(personSelected.id);selectPerson(personSelected);
+      }
+      if(e.key===']'||e.key==='['){
+        const id=cyclePerson(e.key===']'?1:-1);
+        if(id)e.preventDefault();
+      }
+    });
+  }
+
+  createCanvasApp(p=>{
     sketch=p;
     p.setup=()=>{
       const stage=$('stage');
@@ -2303,22 +2575,7 @@
       });observer.observe(stage);
       if(requestEmbed)setImmersive(true);
       const buildingAssets=window.CityDistrict||window.CityBlender;
-      if(physicalScene&&buildingAssets){
-        Promise.allSettled([buildingAssets.load(),CityHousing.load()]).then(results=>{
-          physicalScene.rebuild(city,life,town.residents);refreshTown(true);frameTime=performance.now();
-          if(results[0].status==='fulfilled'){
-            $('blender-status').textContent=city.buildings.length+' 组已就绪';$('blender-toggle').disabled=false;$('blender-focus').disabled=false;
-            document.documentElement.dataset.blenderReady='true';
-          }else{$('blender-status').textContent='使用基础楼体';console.warn('District assets unavailable; keeping procedural buildings.',results[0].reason);}
-          if(results[1].status==='fulfilled'){
-            $('housing-blender-status').textContent='四类住宅 · Blender 精修';$('housing-blender-toggle').disabled=false;
-            document.documentElement.dataset.refinedHousingReady='true';
-          }else{$('housing-blender-status').textContent='使用原住宅模型';document.documentElement.dataset.refinedHousingReady='fallback';console.warn('Housing assets unavailable; keeping procedural housing.',results[1].reason);}
-          if(settings.solarShow){state.time=city.duration;state.droneShowStart=state.time;updateDroneControls();chooseView('solar');pause(reducedMotion);}
-          else if(new URLSearchParams(location.search).get('sample')==='blender')focusBlender();
-          else if(new URLSearchParams(location.search).get('sample')==='district'){state.time=city.duration;pause(true);chooseView(layoutEditing?'top':'home');}
-        });
-      }else{$('blender-status').textContent='精细建筑需要三维模式';$('housing-blender-status').textContent='兼容模式住宅';document.documentElement.dataset.refinedHousingReady='fallback';}
+      if(!(physicalScene&&buildingAssets)){$('blender-status').textContent='精细建筑需要三维模式';$('housing-blender-status').textContent='兼容模式住宅';document.documentElement.dataset.refinedHousingReady='fallback';}
       document.addEventListener('visibilitychange',()=>{frameTime=null;if(document.hidden)p.noLoop();else p.loop();});
     };
     p.draw=()=>{
@@ -2340,7 +2597,7 @@
         for(const key of ['yaw','pitch','zoom'])state[key]=mix(state[key],targets[key],factor);
         if(Math.abs(state.yaw-targets.yaw)+Math.abs(state.pitch-targets.pitch)+Math.abs(state.zoom-targets.zoom)<.001){Object.assign(state,targets);targets=null;}
       }
-      if(renderTo(p.drawingContext,p.width,p.height)!==false){$('loading').hidden=true;document.documentElement.dataset.ready='true';renderCount++;}updateUI();lastFrameMs=performance.now()-before;
+      if(renderTo(p.drawingContext,p.width,p.height)!==false){$('loading').hidden=true;document.documentElement.dataset.ready='true';renderCount++;if(renderCount===1)refineScene();}updatePersonVoice();updateUI();lastFrameMs=performance.now()-before;
     };
   });
   window.cityStudio={
@@ -2385,6 +2642,17 @@
     exportSnapshot:()=>CityPlanSnapshots.serialize(currentSnapshot()),
     windowLight,
     previewEffect:next=>{if(!physicalScene) return false;physicalScene.setEffectPreview(next);renderTo(sketch.drawingContext,sketch.width,sketch.height);return true;},
-    getPlan:()=>JSON.parse(JSON.stringify(city)),getActivity:()=>{const activity=CityLife.sample(life,state.daySeconds,refreshTown().demand);return {...activity,vehicles:dailyVehicles(activity.vehicles),transit:CityTransitMotion.sample(transitPlan,state.time,state.daySeconds)};},exportPNG
+    getPlan:()=>JSON.parse(JSON.stringify(city)),getActivity:()=>{const activity=CityLife.sample(life,state.daySeconds,refreshTown().demand);return {...activity,vehicles:dailyVehicles(activity.vehicles),transit:CityTransitMotion.sample(transitPlan,state.time,state.daySeconds)};},exportPNG,
+    // Street-people hooks (QA + optional embedding API).
+    // Coordinates are client (event) coordinates: the stage rect is subtracted here so
+    // callers can pass pointer positions straight through, exactly like the DOM events.
+    pickPersonAt:(x,y)=>{if(!physicalScene)return null;const rect=$('stage').getBoundingClientRect();return physicalScene.pickPerson(x-rect.left,y-rect.top,rect.width,rect.height);},
+    selectPersonAt:(x,y)=>{const hit=window.cityStudio.pickPersonAt(x,y);if(hit)selectPerson(hit);return hit;},
+    selectedPerson:()=>personSelected,
+    streetPeople:()=>physicalScene?physicalScene.peopleOnScreen(sketch.width,sketch.height):[],
+    nextPerson:()=>cyclePerson(1),
+    prevPerson:()=>cyclePerson(-1),
+    followPerson:id=>{followPerson(id);return state.focusPerson;},
+    stopFollowing:()=>{stopFollow();if(personSelected)selectPerson(personSelected);return true;}
   };
 })();

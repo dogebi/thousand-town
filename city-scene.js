@@ -484,9 +484,128 @@ let solarShow=null,solarBounds=[];
 let city,life,ground,facilities=null,housing=null,frontage=null,helipad=null,airship=null,buildingRoot,actorRoot,buildings=[],plinthBatch=null,actors,bounds=[],district=null,prototype=null,prototypeBuilding=null,width=0,height=0,pixelRatio=0,lastColors='',lastSignature='',lastShadow=-1,lastReflection=-1,lastCamera='',lastWaterCamera='',waterCameraMoving=false,facadeDeferred=false,waterPending=false,reflect,actorsData=null,windowLights=[];
 let facadeReflection=null,facadeReflectionKey='',facadeMaterials=[],facadeLight=1;
 let initialProgramsPrepared=false,programsQueued=false,painted=false,facadeJob=null,facadePending=true;
+// A driver that never flips isReady() for some shader variant (SwiftShader, a few
+// mobile GL stacks) used to hold the loading sheet forever: every frame returned
+// false before the first render. The poll is now bounded — compile once, give the
+// driver a short grace window, then paint regardless.
+let programWaitStart=0,programWaitFrames=0;
 let townView=null,townBindings=null;
 let officeWindows=null,officePanes=[],officeLightKey='',officeArchitecture=null;
 const pickRay=new T.Raycaster(),pickBox=new T.Box3(),pickPoint=new T.Vector3();
+// ── street people picking (2026-11-05) ──────────────────────────────────────
+// The town batch is one merged SkinnedMesh, so instanceId picking cannot work.
+// Instead every visible street proxy is projected to screen space and the closest
+// one to the pointer within a small radius wins — ~150 people, one pass, no raycast.
+let actorPickList=[];
+const pickPersonPoint=new T.Vector3(),pickPersonProjected=new T.Vector3();
+let selectedPersonId=null,personMarker=null,personMarkerTime=0,hoveredPersonId=null;
+// When the WebGL canvas has replaced the p5 canvas it is composited directly by the
+// browser, so the per-frame 2D blit below would draw into a detached canvas.
+let attachedCanvas=false;
+function personSample(id){
+  for(const p of actorPickList){if(String(p.id)===String(id))return p;}
+  return null;
+}
+// One visibility rule for hover, picking, the ring, the speech bubble and follow.
+// A pedestrian who has walked into a building footprint is no longer drawn (their
+// proxy is parked under the floor), so anything still pointing at them would ring an
+// empty doorway and drag the follow camera through the wall. CityModel.onBoard only
+// answers "inside the town board", so the footprint test is done here.
+function insideBuilding(x,z){
+  if(!city||!city.buildings)return false;
+  const list=city.buildings;
+  for(let i=0;i<list.length;i++){
+    const b=list[i];
+    if(Math.abs(x-b.x)<=b.w*.5&&Math.abs(z-b.z)<=b.d*.5)return true;
+  }
+  return false;
+}
+function personVisible(p){
+  if(!p||p.active===false||(p.visibility??1)<=.12)return false;
+  return !insideBuilding(p.x,p.z);
+}
+function ensurePersonMarker(){
+  if(personMarker||!T.RingGeometry)return personMarker;
+  const geo=new T.RingGeometry(.62,.86,28),mat=new T.MeshBasicMaterial({color:0xffcf91,transparent:true,opacity:.85,depthWrite:false,side:T.DoubleSide});
+  personMarker=new T.Mesh(geo,mat);personMarker.name='person-selection-ring';
+  personMarker.rotation.x=-Math.PI/2;personMarker.renderOrder=900;personMarker.visible=false;
+  scene.add(personMarker);return personMarker;
+}
+function syncPersonMarker(){
+  const marker=ensurePersonMarker();if(!marker)return;
+  const live=p=>personVisible(p)?p:null;
+  const selected=selectedPersonId==null?null:live(personSample(selectedPersonId));
+  // The same ring serves hover (quiet, small) and selection (pulsing, amber).
+  const p=selected||(hoveredPersonId==null?null:live(personSample(hoveredPersonId)));
+  if(!p){marker.visible=false;return;}
+  const t=(typeof performance!=='undefined'?performance.now():Date.now())/1000;
+  marker.visible=true;
+  marker.position.set(p.x,(p.y||0)+.07,p.z);
+  // Keep the ring readable at any distance — at the home view a person is ~3 px
+  // tall, so a fixed world-size ring would be invisible.
+  const dist=camera.position.distanceTo(marker.position);
+  const ringScale=Math.max(.7,Math.min(9,dist*.019));
+  if(p===selected){
+    marker.scale.setScalar(ringScale*(1+.05*Math.sin(t*4)));
+    marker.material.opacity=.55+.3*(.5+.5*Math.sin(t*4));
+  }else{
+    marker.scale.setScalar(ringScale*.8);
+    marker.material.opacity=.28;
+  }
+}
+function setHoveredPerson(id){
+  const next=id==null?null:String(id);
+  if(next===hoveredPersonId)return hoveredPersonId;
+  hoveredPersonId=next;syncPersonMarker();return hoveredPersonId;
+}
+function pickPerson(px,py,w,h){
+  if(!actorPickList.length)return null;
+  const threshold=Math.max(16,Math.min(34,w*.05));
+  let best=null,bestDist=Infinity;
+  for(const p of actorPickList){
+    if(!personVisible(p))continue;
+    pickPersonPoint.set(p.x,(p.y||0)+1.62,p.z).project(camera);
+    if(pickPersonPoint.z<-1||pickPersonPoint.z>1)continue;
+    const sx=(pickPersonPoint.x*.5+.5)*w,sy=(-pickPersonPoint.y*.5+.5)*h;
+    if(sx<-40||sy<-40||sx>w+40||sy>h+40)continue;
+    const d=Math.hypot(sx-px,sy-py);
+    if(d<bestDist){bestDist=d;best={p,sx,sy};}
+  }
+  if(!best||bestDist>threshold)return null;
+  const p=best.p;
+  return {id:String(p.id),kind:p.kind||'pedestrian',standing:p.standing===true,
+    role:p.appearanceRole||null,destination:p.destination||p.to||null,
+    ledgerId:p.ledgerId||null,activity:p.activityKind||null,
+    x:p.x,y:p.y,z:p.z,screenX:best.sx,screenY:best.sy,distance:bestDist};
+}
+function personScreenPoint(id,w,h){
+  const p=personSample(id);if(!personVisible(p))return null;
+  pickPersonProjected.set(p.x,(p.y||0)+1.9,p.z).project(camera);
+  if(pickPersonProjected.z<-1||pickPersonProjected.z>1)return null;
+  return {x:(pickPersonProjected.x*.5+.5)*w,y:(-pickPersonProjected.y*.5+.5)*h};
+}
+function personPosition(id){
+  const p=personSample(id);
+  return personVisible(p)?{x:p.x,y:(p.y||0)+1.2,z:p.z}:null;
+}
+function setSelectedPerson(id){selectedPersonId=id==null?null:String(id);syncPersonMarker();return selectedPersonId;}
+// People browsing: the on-screen list for the ←/→ walk through the crowd. Sorted by
+// distance to the middle of the viewport so stepping always feels local.
+function peopleOnScreen(w,h){
+  const out=[];
+  for(const p of actorPickList){
+    if(!personVisible(p))continue;
+    pickPersonPoint.set(p.x,(p.y||0)+1.2,p.z).project(camera);
+    if(pickPersonPoint.z<-1||pickPersonPoint.z>1)continue;
+    const sx=(pickPersonPoint.x*.5+.5)*w,sy=(-pickPersonPoint.y*.5+.5)*h;
+    if(sx<-8||sy<-8||sx>w+8||sy>h+8)continue;
+    out.push({id:String(p.id),kind:p.kind||'pedestrian',x:sx,y:sy,standing:p.standing===true,
+      activity:p.activityKind||null,role:p.appearanceRole||null});
+  }
+  out.sort((a,b)=>Math.hypot(a.x-w/2,a.y-h/2)-Math.hypot(b.x-w/2,b.y-h/2));
+  return out;
+}
+
     // Review is opt-in and uses the existing city, camera, lighting and batches.
     let effectPreview=null,fireworkShow=null,fireworkTowerPlan=[];
     const effectScreenPoint=new T.Vector3();
@@ -948,7 +1067,7 @@ e[12]=p.x+(e[12]-p.x)*size;e[13]=p.y+(e[13]-p.y)*size;e[14]=p.z+(e[14]-p.z)*size
 mesh.setMatrixAt(index,matrix);
 }
     function updateActors(time,lighting,daySeconds){
-if(!actorsData)actorsData=CityLife.createSample(life);const o=CityLife.sampleInto(life,time,actorsData,townView&&townView.demand);const ak=Number.isFinite(daySeconds);headLightMat.emissiveIntensity=lighting?lighting.lamps*3.2:0;tailLightMat.emissiveIntensity=lighting?lighting.lamps*2.2:0;carPoolMat.opacity=lighting?lighting.lamps*.42:0;actors.carPools.visible=!!lighting&&lighting.lamps>0;activeCars=0;let A=0;o.vehicles.forEach((v,i)=>{v.fade=ak?CityLighting.streetVisibility(life.vehicles[i],serviceRoutes[life.vehicles[i].route],daySeconds):1;v.active=v.fade>0;if(v.active)activeCars++;const B=-v.heading,t=v.kind==='shuttle'?9:v.kind==='van'?8.7:v.kind==='compact'?7.2:8,al=v.kind==='van',e=v.kind==='shuttle',c=Math.cos(v.heading),s=Math.sin(v.heading);put(actors.body,i,v.x,v.y+1.17,v.z,t,1.3,3.35,B);put(actors.cabin,i,v.x-.35*c,v.y+(e?2.49:2.29),v.z-.35*s,e?7.7:al?5.6:4,e?1.5:1.1,2.83,B);put(actors.roof,i,v.x-.35*c,v.y+(e?3.29:2.89),v.z-.35*s,e?8:al?5.2:3.5,.16,2.99,B);const E=(m,ar,x,y,z,w,h,d)=>put(m,ar,v.x+x*c-z*s,v.y+y,v.z+x*s+z*c,w,h,d,B);const aE=e?3.29:2.89,O=e?3.15:2.78,F=1.82;for(let k=0;k<6;k++)E(actors.carPillars,i*6+k,-.35+(Math.floor(k/2)-1)*(e?3.75:al?2.65:1.9),(O+F)/2,k%2?1.43:-1.43,.12,O-F,.12);const W=e?4:i%3===0?2:1;for(let k=0;k<4;k++){const x=e?2.5-Math.floor(k/2)*2.6:(k<2?.65:-1.05),z=k%2?.7:-.7;E(actors.carSeats,i*4+k,x-.18,1.88,z,.68,.5,.7);if(k<W){E(actors.carPeople,i*4+k,x,e?2.33:2.12,z,.4,e?.55:.35,.43);E(actors.carHeads,i*4+k,x+.06,e?2.86:2.52,z,.22,.25,.22);}else{actors.carPeople.setMatrixAt(i*4+k,hiddenMatrix);actors.carHeads.setMatrixAt(i*4+k,hiddenMatrix);}}E(actors.steering,i,e?3.15:1.25,2.06,-.7,.28,.07,.28);for(let P=0;P<2;P++){E(actors.headlights,i*2+P,t/2+.015,1.45,P?1.08:-1.08,.08,.3,.56);E(actors.taillights,i*2+P,-t/2-.015,1.5,P?1.08:-1.08,.08,.24,.45);}const px=v.x+(t/2+2.6)*c,pz=v.z+(t/2+2.6)*s;const aa=CityLighting.roadHeight(city,px,pz),am=(CityLighting.roadHeight(city,px+c,pz+s)-CityLighting.roadHeight(city,px-c,pz-s))/2;pos.set(px,aa+.045,pz);q.setFromAxisAngle(up,B).multiply(new T.Quaternion().setFromAxisAngle(new T.Vector3(0,0,1),Math.atan(am)));scale.set(5.8,1,3.6);matrix.compose(pos,q,scale);actors.carPools.setMatrixAt(i,matrix);if(v.police){const as=v.y+3.32;put(actors.lightBar,A++,v.x-.35*c+1.1*c,as,v.z-.35*s+1.1*s,.7,.2,.34,B);put(actors.lightBar,A++,v.x-.35*c-1.1*c,as,v.z-.35*s-1.1*s,.7,.2,.34,B);}let k=i*4;for(const ai of[-1,1])for(const aj of[-1,1]){pos.set(v.x+aj*t*.29*c-ai*1.65*s,v.y+.7,v.z+aj*t*.29*s+ai*1.65*c);q.setFromAxisAngle(up,B).multiply(wheelQ);scale.set(.66,.45,.66);matrix.compose(pos,q,scale);actors.wheels.setMatrixAt(k++,matrix);}});const l=a=>a.active===false||!CityModel.onBoard(city,a.x,a.z);const g=(at,an,ao)=>{for(let i=0;i<ao;i++)at.setMatrixAt(an+i,hiddenMatrix);};const Q=R=>{g(actors.torso,R,1);g(actors.head,R*3,3);g(actors.legs,R*4,4);g(actors.arms,R*4,4);g(actors.backpack,R*3,3);};if(residentBatch)residentBatch.update([...o.pedestrians,...o.shoppers].map(p=>l(p)?{...p,active:false}:p));const H=(u,p)=>{if(residentBatch){if(p.kind!=='ferris')return;u=seatedSlots.get(p.id);if(u===undefined)return;}if(l(p)){if(personVisibility[u]!==false)Q(u);personVisibility[u]=false;return;}personVisibility[u]=true;const S=p.visibility??1;for(const[au,ab]of[['torso',1],['head',3],['legs',4],['arms',4],['backpack',3]])actorFade(actors[au],u*ab,ab,S);const pose=personPose(p,personScratch),c=Math.cos(p.heading),s=Math.sin(p.heading),J=p.size||1;const X=(v,a,b,h)=>v.set(p.x+(a*c-b*s)*J,p.y+h*J,p.z+(a*s+b*c)*J);const U=(av,ap,a,b,h,w,d,aq)=>{X(pos,a,b,h);put(av,ap,pos.x,pos.y,pos.z,w*J,d*J,aq*J,-p.heading);};U(actors.torso,u,pose.lean*.5,0,2.37+pose.bob,.30,1.34,.46);U(actors.head,u*3,pose.lean,0,pose.headY,.38,.41,.36);for(let K=0;K<2;K++){for(const[aw,C,ah]of[[actors.legs,pose.legs,.145],[actors.arms,pose.arms,.13]]){const ax=K*9;for(let j=0;j<2;j++){const k=ax+j*3;X(limbA,C[k],C[k+1],C[k+2]);X(limbB,C[k+3],C[k+4],C[k+5]);limb(aw,u*4+K*2+j,limbA,limbB,ah*J);}}const k=K*9;U(actors.head,u*3+K+1,pose.arms[k+6],pose.arms[k+7],pose.arms[k+8],.14,.17,.14);U(actors.backpack,u*3+K,pose.legs[k+6]+.10,pose.legs[k+7],pose.legs[k+8]-.035,.44,.20,.30);}if(pose.pack)U(actors.backpack,u*3+2,-.36,0,2.48+pose.bob,.34,.82,.65);else actors.backpack.setMatrixAt(u*3+2,hiddenMatrix);};o.pedestrians.forEach((p,i)=>H(i,p));o.shoppers.forEach((p,i)=>H(o.pedestrians.length+i,p));o.pets.forEach((p,i)=>{for(const[ay,ac]of[['petBody',1],['petHead',1],['petTail',1],['petLegs',4]])actorFade(actors[ay],i*ac,ac,p.visibility??1);const c=Math.cos(p.heading),s=Math.sin(p.heading),f=p.size||1,aF=Math.sin(p.phase);const L=p.y+f*(p.kind==='dog'?.95:.72);put(actors.petBody,i,p.x,L,p.z,f*(p.kind==='dog'?1.7:1.35),f*.62,f*.62,p.heading);put(actors.petHead,i,p.x+c*f*.95,L+f*.42,p.z+s*f*.95,f*.5,f*.5,f*.46,p.heading);limbA.set(p.x-c*f*.8,L-f*.1,p.z-s*f*.8);limbB.set(p.x-c*f*1.35+Math.sin(p.phase*.5)*f*.3,L+f*.55,p.z-s*f*1.35);limb(actors.petTail,i,limbA,limbB,f*.09);for(const Y of[-1,1])for(const Z of[-1,1]){const id=i*4+(Y>0?2:0)+(Z>0?1:0);const ad=Y*Math.sin(p.phase+(Z>0?Math.PI:0))*f*.28;limbA.set(p.x+Z*f*.5*c-Y*f*.24*s,L-f*.28,p.z+Z*f*.5*s+Y*f*.24*c);limbB.set(limbA.x+ad*c,Math.max(p.y,p.y+f*.06),limbA.z+ad*s);limb(actors.petLegs,id,limbA,limbB,f*.1);}});// sitting forward with both hands on the bars.
+if(!actorsData)actorsData=CityLife.createSample(life);const o=CityLife.sampleInto(life,time,actorsData,townView&&townView.demand);actorPickList=o.pedestrians.concat(o.shoppers,o.riders||[]);const ak=Number.isFinite(daySeconds);headLightMat.emissiveIntensity=lighting?lighting.lamps*3.2:0;tailLightMat.emissiveIntensity=lighting?lighting.lamps*2.2:0;carPoolMat.opacity=lighting?lighting.lamps*.42:0;actors.carPools.visible=!!lighting&&lighting.lamps>0;activeCars=0;let A=0;o.vehicles.forEach((v,i)=>{v.fade=ak?CityLighting.streetVisibility(life.vehicles[i],serviceRoutes[life.vehicles[i].route],daySeconds):1;v.active=v.fade>0;if(v.active)activeCars++;const B=-v.heading,t=v.kind==='shuttle'?9:v.kind==='van'?8.7:v.kind==='compact'?7.2:8,al=v.kind==='van',e=v.kind==='shuttle',c=Math.cos(v.heading),s=Math.sin(v.heading);put(actors.body,i,v.x,v.y+1.17,v.z,t,1.3,3.35,B);put(actors.cabin,i,v.x-.35*c,v.y+(e?2.49:2.29),v.z-.35*s,e?7.7:al?5.6:4,e?1.5:1.1,2.83,B);put(actors.roof,i,v.x-.35*c,v.y+(e?3.29:2.89),v.z-.35*s,e?8:al?5.2:3.5,.16,2.99,B);const E=(m,ar,x,y,z,w,h,d)=>put(m,ar,v.x+x*c-z*s,v.y+y,v.z+x*s+z*c,w,h,d,B);const aE=e?3.29:2.89,O=e?3.15:2.78,F=1.82;for(let k=0;k<6;k++)E(actors.carPillars,i*6+k,-.35+(Math.floor(k/2)-1)*(e?3.75:al?2.65:1.9),(O+F)/2,k%2?1.43:-1.43,.12,O-F,.12);const W=e?4:i%3===0?2:1;for(let k=0;k<4;k++){const x=e?2.5-Math.floor(k/2)*2.6:(k<2?.65:-1.05),z=k%2?.7:-.7;E(actors.carSeats,i*4+k,x-.18,1.88,z,.68,.5,.7);if(k<W){E(actors.carPeople,i*4+k,x,e?2.33:2.12,z,.4,e?.55:.35,.43);E(actors.carHeads,i*4+k,x+.06,e?2.86:2.52,z,.22,.25,.22);}else{actors.carPeople.setMatrixAt(i*4+k,hiddenMatrix);actors.carHeads.setMatrixAt(i*4+k,hiddenMatrix);}}E(actors.steering,i,e?3.15:1.25,2.06,-.7,.28,.07,.28);for(let P=0;P<2;P++){E(actors.headlights,i*2+P,t/2+.015,1.45,P?1.08:-1.08,.08,.3,.56);E(actors.taillights,i*2+P,-t/2-.015,1.5,P?1.08:-1.08,.08,.24,.45);}const px=v.x+(t/2+2.6)*c,pz=v.z+(t/2+2.6)*s;const aa=CityLighting.roadHeight(city,px,pz),am=(CityLighting.roadHeight(city,px+c,pz+s)-CityLighting.roadHeight(city,px-c,pz-s))/2;pos.set(px,aa+.045,pz);q.setFromAxisAngle(up,B).multiply(new T.Quaternion().setFromAxisAngle(new T.Vector3(0,0,1),Math.atan(am)));scale.set(5.8,1,3.6);matrix.compose(pos,q,scale);actors.carPools.setMatrixAt(i,matrix);if(v.police){const as=v.y+3.32;put(actors.lightBar,A++,v.x-.35*c+1.1*c,as,v.z-.35*s+1.1*s,.7,.2,.34,B);put(actors.lightBar,A++,v.x-.35*c-1.1*c,as,v.z-.35*s-1.1*s,.7,.2,.34,B);}let k=i*4;for(const ai of[-1,1])for(const aj of[-1,1]){pos.set(v.x+aj*t*.29*c-ai*1.65*s,v.y+.7,v.z+aj*t*.29*s+ai*1.65*c);q.setFromAxisAngle(up,B).multiply(wheelQ);scale.set(.66,.45,.66);matrix.compose(pos,q,scale);actors.wheels.setMatrixAt(k++,matrix);}});const l=a=>a.active===false||!CityModel.onBoard(city,a.x,a.z);const g=(at,an,ao)=>{for(let i=0;i<ao;i++)at.setMatrixAt(an+i,hiddenMatrix);};const Q=R=>{g(actors.torso,R,1);g(actors.head,R*3,3);g(actors.legs,R*4,4);g(actors.arms,R*4,4);g(actors.backpack,R*3,3);};if(residentBatch)residentBatch.update([...o.pedestrians,...o.shoppers].map(p=>l(p)?{...p,active:false}:p));const H=(u,p)=>{if(residentBatch){if(p.kind!=='ferris')return;u=seatedSlots.get(p.id);if(u===undefined)return;}if(l(p)){if(personVisibility[u]!==false)Q(u);personVisibility[u]=false;return;}personVisibility[u]=true;const S=p.visibility??1;for(const[au,ab]of[['torso',1],['head',3],['legs',4],['arms',4],['backpack',3]])actorFade(actors[au],u*ab,ab,S);const pose=personPose(p,personScratch),c=Math.cos(p.heading),s=Math.sin(p.heading),J=p.size||1;const X=(v,a,b,h)=>v.set(p.x+(a*c-b*s)*J,p.y+h*J,p.z+(a*s+b*c)*J);const U=(av,ap,a,b,h,w,d,aq)=>{X(pos,a,b,h);put(av,ap,pos.x,pos.y,pos.z,w*J,d*J,aq*J,-p.heading);};U(actors.torso,u,pose.lean*.5,0,2.37+pose.bob,.30,1.34,.46);U(actors.head,u*3,pose.lean,0,pose.headY,.38,.41,.36);for(let K=0;K<2;K++){for(const[aw,C,ah]of[[actors.legs,pose.legs,.145],[actors.arms,pose.arms,.13]]){const ax=K*9;for(let j=0;j<2;j++){const k=ax+j*3;X(limbA,C[k],C[k+1],C[k+2]);X(limbB,C[k+3],C[k+4],C[k+5]);limb(aw,u*4+K*2+j,limbA,limbB,ah*J);}}const k=K*9;U(actors.head,u*3+K+1,pose.arms[k+6],pose.arms[k+7],pose.arms[k+8],.14,.17,.14);U(actors.backpack,u*3+K,pose.legs[k+6]+.10,pose.legs[k+7],pose.legs[k+8]-.035,.44,.20,.30);}if(pose.pack)U(actors.backpack,u*3+2,-.36,0,2.48+pose.bob,.34,.82,.65);else actors.backpack.setMatrixAt(u*3+2,hiddenMatrix);};o.pedestrians.forEach((p,i)=>H(i,p));o.shoppers.forEach((p,i)=>H(o.pedestrians.length+i,p));o.pets.forEach((p,i)=>{for(const[ay,ac]of[['petBody',1],['petHead',1],['petTail',1],['petLegs',4]])actorFade(actors[ay],i*ac,ac,p.visibility??1);const c=Math.cos(p.heading),s=Math.sin(p.heading),f=p.size||1,aF=Math.sin(p.phase);const L=p.y+f*(p.kind==='dog'?.95:.72);put(actors.petBody,i,p.x,L,p.z,f*(p.kind==='dog'?1.7:1.35),f*.62,f*.62,p.heading);put(actors.petHead,i,p.x+c*f*.95,L+f*.42,p.z+s*f*.95,f*.5,f*.5,f*.46,p.heading);limbA.set(p.x-c*f*.8,L-f*.1,p.z-s*f*.8);limbB.set(p.x-c*f*1.35+Math.sin(p.phase*.5)*f*.3,L+f*.55,p.z-s*f*1.35);limb(actors.petTail,i,limbA,limbB,f*.09);for(const Y of[-1,1])for(const Z of[-1,1]){const id=i*4+(Y>0?2:0)+(Z>0?1:0);const ad=Y*Math.sin(p.phase+(Z>0?Math.PI:0))*f*.28;limbA.set(p.x+Z*f*.5*c-Y*f*.24*s,L-f*.28,p.z+Z*f*.5*s+Y*f*.24*c);limbB.set(limbA.x+ad*c,Math.max(p.y,p.y+f*.06),limbA.z+ad*s);limb(actors.petLegs,id,limbA,limbB,f*.1);}});// sitting forward with both hands on the bars.
 o.riders.forEach((r,i)=>{const V=r.visibility??1;for(const[az,ae]of[['bikeWheel',2],['bikeFrame',1],['bikeBody',2],['riderTorso',1],['riderHead',1],['riderLegs',2],['riderArms',2]])actorFade(actors[az],i*ae,ae,V);const c=Math.cos(r.heading),s=Math.sin(r.heading),M=r.kind!=='bicycle';const D=M?4.6:3.9,I=M?.5:.46;for(const af of[-1,1]){pos.set(r.x+af*D*.32*c,r.y+I,r.z+af*D*.32*s);q.setFromAxisAngle(up,-r.heading).multiply(wheelQ);scale.set(I*2,.16,I*2);matrix.compose(pos,q,scale);actors.bikeWheel.setMatrixAt(i*2+(af>0?1:0),matrix);}put(actors.bikeFrame,i,r.x,r.y+I*.95,r.z,D*.86,.14,.24,-r.heading);if(M){put(actors.bikeBody,i*2,r.x,r.y+.62,r.z,D*.72,.5,.5,-r.heading);put(actors.bikeBody,i*2+1,r.x+c*D*.34,r.y+.86,r.z+s*D*.34,.9,.28,.42,-r.heading);}limbA.set(r.x-c*.3,r.y+1.5,r.z-s*.3);limbB.set(r.x+c*.1,r.y+2.45,r.z+s*.1);limb(actors.riderTorso,i,limbA,limbB,.4);put(actors.riderHead,i,r.x+c*.22,r.y+2.92,r.z+s*.22,.46,.5,.45);for(const G of[-1,1]){const id=i*2+(G>0?1:0);limbA.set(r.x-G*.26*s,r.y+1.42,r.z+G*.26*c);limbB.set(r.x+c*.75-G*.3*s,r.y+.86,r.z+s*.75+G*.3*c);limb(actors.riderLegs,id,limbA,limbB,.17);limbA.set(r.x+c*.16-G*.3*s,r.y+2.34,r.z+s*.16+G*.3*c);limbB.set(r.x+c*.86-G*.34*s,r.y+2.06,r.z+s*.86+G*.34*c);limb(actors.riderArms,id,limbA,limbB,.14);}});o.balloons.forEach((b,i)=>{actorFade(actors.balloon,i,1,b.visibility??1);put(actors.balloon,i,b.x,b.y,b.z,b.radius,b.radius*1.15,b.radius);});o.balls.forEach((b,i)=>{actorFade(actors.ball,i,1,b.visibility??1);put(actors.ball,i,b.x,b.y,b.z,b.radius,b.radius,b.radius);});if(window.__auditHidden){window.__auditHidden=[];}o.vehicles.forEach((v,i)=>{if(!l(v)&&v.active)return;for(const[aA,n]of[['carPillars',6],['carSeats',4],['carHeads',4],['carPeople',4],['steering',1],['headlights',2],['taillights',2],['carPools',1]])g(actors[aA],i*n,n);g(actors.body,i,1);g(actors.cabin,i,1);g(actors.roof,i,1);g(actors.wheels,i*4,4);});o.vehicles.forEach((v,i)=>{const N=v.fade;if(!(N>0&&N<1))return;const p={x:v.x,y:v.y,z:v.z};resizePerson(actors.body,i,p,N);resizePerson(actors.cabin,i,p,N);resizePerson(actors.roof,i,p,N);for(const[aB,n]of[['carPillars',6],['carSeats',4],['carHeads',4],['carPeople',4],['steering',1],['headlights',2],['taillights',2],['carPools',1]])for(let k=0;k<n;k++)resizePerson(actors[aB],i*n+k,p,N);for(let k=0;k<4;k++)resizePerson(actors.wheels,i*4+k,p,N);});let ag=0;o.vehicles.forEach(v=>{if(!v.police)return;if(l(v)||!v.active)g(actors.lightBar,ag,2);ag+=2;});o.pets.forEach((p,i)=>{if(!l(p))return;g(actors.petBody,i,1);g(actors.petHead,i,1);g(actors.petTail,i,1);g(actors.petLegs,i*4,4);});o.riders.forEach((r,i)=>{if(!l(r))return;g(actors.bikeWheel,i*2,2);g(actors.bikeFrame,i,1);g(actors.bikeBody,i*2,2);g(actors.riderTorso,i,1);g(actors.riderHead,i,1);g(actors.riderLegs,i*2,2);g(actors.riderArms,i*2,2);});o.balloons.forEach((b,i)=>{if(l(b))g(actors.balloon,i,1);});o.balls.forEach((b,i)=>{if(l(b))g(actors.ball,i,1);});for(let i=0;i<2;i++){const z=((time*(i?-1.3:1.6)+i*135+180)%280+280)%280-140,x=i?-5:5,y=-.44+Math.sin(time*.8+i)*.08;put(actors.hull,i,x,y,z,4.7,.75,10.5);put(actors.deck,i,x,y+.6,z,3.1,.5,4.5);}if(vehicleShell)vehicleShell.sync();if(carHeadBatch)carHeadBatch.sync();for(const m of Object.values(actors))m.instanceMatrix.needsUpdate=true;}
     function updateBuildings(time){
 if(officeArchitecture)officeArchitecture.update(time);const e=Boolean(district&&settings.blenderModel!==false);if(district){district.setEnabled(e);district.update(time);}buildings.forEach(o=>{const s=CityModel.sampleBuilding(o.b,time),p=Math.min(s.builtFloors,o.cut),j=Math.max(0,s.builtFloors-o.cut);const c=e||Boolean(prototype&&o.b===prototypeBuilding&&settings.blenderModel!==false);if(prototype&&o.b===prototypeBuilding){prototype.setEnabled(c);prototype.update(s);}o.low.visible=p>0&&!c;o.low.scale.y=Math.max(.01,p*6);o.low.position.y=1.4+p*3;if(o.upper){o.upper.visible=j>0&&!c;o.upper.scale.y=Math.max(.01,j*6);o.upper.position.y=1.4+o.cut*6+j*3;o.terrace.visible=s.builtFloors>=o.cut;}o.sections.forEach(a=>{const n=Math.max(0,Math.min(a.max,s.builtFloors-a.from));a.panes.count=n*a.perFloor;a.frames.count=n*a.framePerFloor;a.panes.visible=a.frames.visible=!c;});const h=s.complete&&!c;if(o.wasComplete!==h){const l=new T.Matrix4().makeScale(0,0,0);o.roofParts.forEach(k=>{k.mesh.setMatrixAt(k.index,h?k.matrix:l);k.mesh.instanceMatrix.needsUpdate=true;});o.wasComplete=h;}o.activeTop.visible=!c&&!s.complete&&s.builtFloors>0;o.activeTop.position.y=s.height+1.5;const f=s.builtFloors>o.cut?o.top:o.b;o.activeTop.scale.set(f.w+.3,.28,f.d+.3);o.falling.forEach((g,i)=>{const m=s.falling[i];g.visible=Boolean(m)&&!c;if(!m)return;const f=m.floor>=o.cut?o.top:o.b;g.position.y=m.y+1.4;g.rotation.y=-m.rotation;g.scale.set(f.w/o.b.w,1,f.d/o.b.d);});});}
@@ -974,7 +1093,7 @@ if(officeArchitecture){officeArchitecture.dispose();officeArchitecture=null;}
 if(prototype){scene.remove(prototype.group);prototype.dispose();prototype=null;}prototypeBuilding=null;
 if(ground){scene.remove(ground.group);ground.dispose();}releaseGroup(buildingRoot);releaseGroup(actorRoot);
 city=nextCity;life=nextLife;ground=CityGround.create(T,kit,city);scene.add(ground.group);if(root.CityAirship){airship=CityAirship.create(T,kit,city);scene.add(airship.group);}nightShowcase=createNightShowcase(T,city,{scene,kit,box,ground,accentMaterial:paneMaterial,castFixtures:true,beamEmitters:airship?.beamEmitters||[]});scene.add(nightShowcase.group);fireworkTowerPlan=root.CityFireworks?root.CityFireworks.towerLaunchPlan(city):[];streetLighting=createStreetLighting(T,ground);scene.add(streetLighting.group);
-reflect=ground.water.onBeforeRender;lastSignature='';lastShadow=-1;lastReflection=-1;lastCamera='';actorsData=null;personVisibility=[];vehicleSample=null;serviceRoutes=CityLighting.streetSchedule(life,city);
+reflect=ground.water.onBeforeRender;lastSignature='';lastShadow=-1;lastReflection=-1;lastCamera='';actorsData=null;personVisibility=[];vehicleSample=null;actorPickList=[];selectedPersonId=null;hoveredPersonId=null;serviceRoutes=CityLighting.streetSchedule(life,city);
 bounds=[];
 for(const x of[-city.extentX,city.extentX])for(const z of[-city.extentZ,city.extentZ])bounds.push(new T.Vector3(x,-5.2,z));
 for(const b of city.buildings)for(const x of[b.x-b.w/2,b.x+b.w/2])for(const z of[b.z-b.d/2,b.z+b.d/2])bounds.push(new T.Vector3(x,b.floors*6+22,z));
@@ -1079,7 +1198,7 @@ const shift=scratchOffset.set(view.c,0,-view.s).multiplyScalar(state.panX/view.s
 .add(scratchDir.set(-view.s*view.sp,view.cp,-view.c*view.sp).multiplyScalar(state.panY/view.scale));
 target.add(shift);camera.position.add(shift);
 }
-if(state.flyTarget){
+if(state.flyTarget&&!state.focusPerson){
 const fly=scratchCenter.set(state.flyTarget.x,state.flyTarget.y||0,state.flyTarget.z);
 const distance=Math.max(h/(2*view.scale*Math.tan(Math.PI/12)),20);
 camera.position.copy(fly).add(scratchDir.set(view.s*view.cp,view.sp,view.c*view.cp).multiplyScalar(distance));
@@ -1155,7 +1274,7 @@ skyScratch.lerp(SKY_DUSK,Math.max(0,1-Math.abs(daylight-.28)/.28)*.5);
 skyScratch.lerp(SKY_DUSK,dusk*.32);scene.background.copy(skyScratch);
 const lifeSeconds=Number.isFinite(state.daySeconds)?state.daySeconds:state.time;
 facadeLight=.22+.78*daylight;
-updateBuildings(Math.min(state.time,city.duration));syncPlinths();updateActors(lifeSeconds,state.lighting,state.daySeconds);ground.update(lifeSeconds,softness,state.lighting,camera,h*ratio);updateEffectPreview(state);streetLighting.update(state.lighting);
+updateBuildings(Math.min(state.time,city.duration));syncPlinths();updateActors(lifeSeconds,state.lighting,state.daySeconds);syncPersonMarker();ground.update(lifeSeconds,softness,state.lighting,camera,h*ratio);updateEffectPreview(state);streetLighting.update(state.lighting);
 if(facilities)facilities.update(Math.min(state.time,city.duration));
 const interiorMode=state.lighting?'town':'legacy';
 if(interiorMode!==interiorLightingMode){
@@ -1185,9 +1304,11 @@ if(!initialProgramsPrepared){
 if(!programsQueued){
 renderer.compile(scene,camera);
 if(ground.water.getRenderTarget){const previous=renderer.getRenderTarget(),water=ground.water.material;try{ground.water.material=null;renderer.setRenderTarget(ground.water.getRenderTarget());renderer.compile(scene,camera);}finally{renderer.setRenderTarget(previous);ground.water.material=water;}}
-programsQueued=true;return false;
+programsQueued=true;programWaitStart=performance.now();return false;
 }
-if(!renderer.info.programs.every(p=>!p.program||!renderer.getContext().isProgram(p.program)||p.isReady()))return false;
+programWaitFrames++;
+const programsReady=renderer.info.programs.every(p=>!p.program||!renderer.getContext().isProgram(p.program)||p.isReady());
+if(!programsReady&&programWaitFrames<24&&performance.now()-programWaitStart<420)return false;
 initialProgramsPrepared=true;
 }
 renderReflectionFrame(state.time,colors+'|'+softness+'|'+Math.floor(minute/30)+'|'+Math.floor(daylight*8),reflectionTick,cameraKey,direct);
@@ -1196,12 +1317,14 @@ if(direct){
 renderer.domElement.style.width=w+'px';renderer.domElement.style.height=h+'px';
 lastSignature=signature;return;
 }
+// The WebGL canvas is in the DOM: nothing to copy, the browser composites it.
+if(attachedCanvas){lastSignature='';return;}
 context.save();context.fillStyle='#e9f0f5';context.fillRect(0,0,w,h);
 context.drawImage(renderer.domElement,0,0,w,h);context.restore();lastSignature='';
 }
     function dispose(){if(residentBatch){residentBatch.dispose();residentBatch=null;}if(solarShow)solarShow.dispose();if(streetLighting)streetLighting.dispose();if(nightShowcase)nightShowcase.dispose();scene.remove(visibleSky.mesh);visibleSky.dispose();releaseFacadeReflection();publicScenes.forEach(item=>item.controller.dispose());publicScenes=[];if(facilities)facilities.dispose();if(housing)housing.dispose();if(frontage)frontage.dispose();if(helipad)helipad.dispose();if(airship)airship.dispose();if(district)district.dispose();if(officeArchitecture)officeArchitecture.dispose();if(prototype){scene.remove(prototype.group);prototype.dispose();}if(ground)ground.dispose();releaseGroup(buildingRoot);releaseGroup(actorRoot);[box,sphere,cylinder,poolGeo,...ownedMaterials].forEach(o=>o.dispose());sun.shadow.dispose();kit.dispose();renderer.dispose();}
-    function attach(stage,previous){renderer.domElement.setAttribute('aria-label',previous.getAttribute('aria-label'));renderer.domElement.setAttribute('role','img');renderer.domElement.style.touchAction='none';stage.replaceChild(renderer.domElement,previous);}
-return{rebuild,render,dispose,attach,scene,setDronePattern,setEffectPreview,setWindowLight,setTownView,pickBuilding,projectBuilding,captureZoomAnchor,clearZoomAnchor,invalidate:()=>{lastSignature='';lastShadow=-1;lastReflection=-1;clearZoomAnchor();},getInfo:()=>({effects:effectPreviewInfo(),initialization:{ready:initialProgramsPrepared,reflectionPending:facadePending,reflectionFace:facadeJob?facadeJob.face:null},nightShowcase:nightShowcase?nightShowcase.getInfo():null,engine:'Three.js r'+T.REVISION,residents:residentBatch?residentBatch.getInfo():null,solarShow:solarShow?solarShow.getInfo():null,shadows:renderer.shadowMap.enabled,shadowMap:sun.shadow.mapSize.toArray(),shadowFrustum:[sun.shadow.camera.left,sun.shadow.camera.right,sun.shadow.camera.top,sun.shadow.camera.bottom],reflection:Boolean(ground&&ground.water),festival:ground?ground.getFestivalInfo():null,blender:district?{id:prototypeBuilding.id,enabled:settings.blenderModel!==false,scope:'district',buildings:city.buildings.filter(b=>!b.facility&&!b.housing).length}:prototype?{id:prototypeBuilding.id,enabled:settings.blenderModel!==false,scope:'sample',buildings:1}:null,district:district?district.getInfo():null,officeArchitecture:officeArchitecture?officeArchitecture.getInfo():null,facilities:facilities?facilities.getInfo():null,housing:housing?housing.getInfo():null,frontage:frontage?frontage.getInfo():null,helipad:helipad?helipad.getInfo():null,airship:airship?airship.getInfo():null,places:Object.fromEntries(publicScenes.map(item=>[item.name,item.controller.getInfo()])),parkSeating:ground?ground.group.userData.groundDetails.parkSeating:[],streetExtras:ground?{bins:ground.group.userData.groundDetails.bins,binAnchors:ground.group.userData.groundDetails.furniture.filter(f=>f.kind==='bin').map(f=>({x:f.x,z:f.z})),streetTrees:ground.group.userData.groundDetails.streetTrees,pedestrianBridges:ground.group.userData.groundDetails.pedestrianBridges,vendingAnchors:ground.group.userData.groundDetails.furniture.filter(f=>f.kind==='vending').map(f=>({x:f.x,z:f.z})),mailboxAnchors:ground.group.userData.groundDetails.furniture.filter(f=>f.kind==='mailbox').map(f=>({x:f.x,z:f.z})),busStops:(city.transitStops||[]).filter(s=>s.kind==='bus').map(s=>({x:s.x,z:s.z,shelter:s.shelter===true}))}:null,officeLights:officePanes.map(e=>({id:e.id,mapId:e.building.id,level:townView?.byBuilding[e.id]?.lightLevel||0,windows:e.panes.length,litWindows:e.litWindows})),windowLights:windowLights.map(item=>({id:item.wing.id,facility:item.wing.facility,panes:item.mesh.count,litWindows:item.litWindows,level:windowLevel(item.wing.id),lit:item.mesh.visible===true})),lighting:{...lightingInfo,gpuSpots:spotPasses.get(renderer)?.stats||null,activeCars,streetLamps:ground?ground.group.userData.groundDetails.lamps:0,streetLampAnchors:ground?ground.group.userData.groundDetails.lampAnchors:[]},calls:renderer.info.render.calls,triangles:renderer.info.render.triangles})};
+    function attach(stage,previous){renderer.domElement.setAttribute('aria-label',previous.getAttribute('aria-label'));renderer.domElement.setAttribute('role','img');renderer.domElement.style.touchAction='none';stage.replaceChild(renderer.domElement,previous);attachedCanvas=true;}
+return{rebuild,render,dispose,attach,scene,pickPerson,peopleOnScreen,personScreenPoint,personPosition,setSelectedPerson,setHoveredPerson,setDronePattern,setEffectPreview,setWindowLight,setTownView,pickBuilding,projectBuilding,captureZoomAnchor,clearZoomAnchor,invalidate:()=>{lastSignature='';lastShadow=-1;lastReflection=-1;clearZoomAnchor();},getInfo:()=>({effects:effectPreviewInfo(),initialization:{ready:initialProgramsPrepared,reflectionPending:facadePending,reflectionFace:facadeJob?facadeJob.face:null},nightShowcase:nightShowcase?nightShowcase.getInfo():null,engine:'Three.js r'+T.REVISION,residents:residentBatch?residentBatch.getInfo():null,solarShow:solarShow?solarShow.getInfo():null,shadows:renderer.shadowMap.enabled,shadowMap:sun.shadow.mapSize.toArray(),shadowFrustum:[sun.shadow.camera.left,sun.shadow.camera.right,sun.shadow.camera.top,sun.shadow.camera.bottom],reflection:Boolean(ground&&ground.water),festival:ground?ground.getFestivalInfo():null,blender:district?{id:prototypeBuilding.id,enabled:settings.blenderModel!==false,scope:'district',buildings:city.buildings.filter(b=>!b.facility&&!b.housing).length}:prototype?{id:prototypeBuilding.id,enabled:settings.blenderModel!==false,scope:'sample',buildings:1}:null,district:district?district.getInfo():null,officeArchitecture:officeArchitecture?officeArchitecture.getInfo():null,facilities:facilities?facilities.getInfo():null,housing:housing?housing.getInfo():null,frontage:frontage?frontage.getInfo():null,helipad:helipad?helipad.getInfo():null,airship:airship?airship.getInfo():null,places:Object.fromEntries(publicScenes.map(item=>[item.name,item.controller.getInfo()])),parkSeating:ground?ground.group.userData.groundDetails.parkSeating:[],streetExtras:ground?{bins:ground.group.userData.groundDetails.bins,binAnchors:ground.group.userData.groundDetails.furniture.filter(f=>f.kind==='bin').map(f=>({x:f.x,z:f.z})),streetTrees:ground.group.userData.groundDetails.streetTrees,pedestrianBridges:ground.group.userData.groundDetails.pedestrianBridges,vendingAnchors:ground.group.userData.groundDetails.furniture.filter(f=>f.kind==='vending').map(f=>({x:f.x,z:f.z})),mailboxAnchors:ground.group.userData.groundDetails.furniture.filter(f=>f.kind==='mailbox').map(f=>({x:f.x,z:f.z})),busStops:(city.transitStops||[]).filter(s=>s.kind==='bus').map(s=>({x:s.x,z:s.z,shelter:s.shelter===true}))}:null,officeLights:officePanes.map(e=>({id:e.id,mapId:e.building.id,level:townView?.byBuilding[e.id]?.lightLevel||0,windows:e.panes.length,litWindows:e.litWindows})),windowLights:windowLights.map(item=>({id:item.wing.id,facility:item.wing.facility,panes:item.mesh.count,litWindows:item.litWindows,level:windowLevel(item.wing.id),lit:item.mesh.visible===true})),lighting:{...lightingInfo,gpuSpots:spotPasses.get(renderer)?.stats||null,activeCars,streetLamps:ground?ground.group.userData.groundDetails.lamps:0,streetLampAnchors:ground?ground.group.userData.groundDetails.lampAnchors:[]},calls:renderer.info.render.calls,triangles:renderer.info.render.triangles})};
 }
 root.CityScene={create,townAppearanceActors,personParts,createPersonPreview,buildSpotGrid,prepareGpuSpotRenderer,createStreetLighting,personPose,facadeMessagePlan,facadeScreenPlan,facadeScreenFrame,facadeMediaPlan,createNightShowcase,createInstanceAggregate,prepareGpuSpotLoop,prepareOpaqueShadow};
 if(typeof module==='object'&&module.exports)module.exports=root.CityScene;

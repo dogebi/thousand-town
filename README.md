@@ -23,7 +23,7 @@
 ## 技术
 
 - [Three.js r180](https://github.com/mrdoob/three.js/tree/r180)（含 Reflector、GLTFLoader）负责三维渲染；
-- [p5.js 1.7.0](https://github.com/processing/p5.js/tree/v1.7.0) 负责草图层；
+- 画布与帧循环由 `sketch.js` 自带的 `createCanvasApp` 提供（2D 上下文只用于无 WebGL 的回退渲染）；
 - 无构建流程、无框架、无运行时外部请求，`vendor/` 与 `assets/` 即全部依赖。
 
 ## 第三方致谢
@@ -31,7 +31,6 @@
 | 组件 | 许可证 |
 |---|---|
 | Three.js r180 / Reflector / GLTFLoader | MIT |
-| p5.js 1.7.0 | LGPL-2.1（`第三方许可/` 内附官方原始分发包，含可读源码） |
 | 银河全景图（ESO / S. Brunier） | CC BY 4.0 |
 
 完整署名与许可文本见 [`第三方许可/`](./第三方许可/) 目录。

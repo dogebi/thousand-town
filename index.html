@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f3f7fa">
   <meta name="description" content="千人小镇：在温暖的现代社区中，观察居民一天的起居、上学与河岸生活。">
   <title>千人小镇 · 看见日常</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=20261105-people6">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22%23285742%22%2F%3E%3Ctext%20x%3D%2232%22%20y%3D%2244%22%20text-anchor%3D%22middle%22%20font-size%3D%2240%22%20fill%3D%22%23fff8da%22%3E%E5%8D%83%3C%2Ftext%3E%3C%2Fsvg%3E">
 </head>
 <body>
@@ -141,6 +141,8 @@
       <div class="model-frame">
         <div id="stage" aria-label="可拖拽旋转和滚轮缩放的三维城市模型">
           <div id="loading" role="status"><span class="loading-mark" aria-hidden="true"></span><span>正在铺开城市图纸…</span></div>
+          <div id="person-hint" class="person-hint" hidden aria-hidden="true"></div>
+          <div id="person-voice" class="person-voice" hidden aria-hidden="true"></div>
         </div>
         <div id="keys-hint" class="keys-hint" aria-label="镜头操作说明">
           <div class="keys-hint-head">
@@ -167,6 +169,7 @@
               <div><dt>单指拖动</dt><dd>旋转视角</dd></div>
               <div><dt>双指捏合</dt><dd>缩放画面</dd></div>
               <div><dt>轻点建筑</dt><dd>查看住户</dd></div>
+              <div><dt>轻点街上的人</dt><dd>查看 · 跟随</dd></div>
             </dl>
           </div>
           <div class="keys-hint-body" data-mode-body="fps" hidden>
@@ -187,6 +190,7 @@
               <div><dt>滑动画布</dt><dd>转向</dd></div>
               <div><dt>双指捏合</dt><dd>缩放</dd></div>
               <div><dt>轻点建筑</dt><dd>查看住户</dd></div>
+              <div><dt>轻点街上的人</dt><dd>查看 · 跟随</dd></div>
             </dl>
           </div>
         </div>
@@ -195,6 +199,22 @@
           <div class="joy-base"><div class="joy-knob" id="joy-knob"></div></div>
         </div>
         <div id="fps-hint" class="fps-hint" hidden>键鼠模式：WASD 移动 · Q/E 升降 · 鼠标转视角 · 滚轮缩放 · Esc 释放鼠标</div>
+        <aside id="person-card" class="person-card" hidden aria-live="polite" aria-label="此刻在街上的人">
+          <div class="person-card-head">
+            <span class="person-card-eyebrow">STREET / 此刻</span>
+            <button id="person-close" type="button" aria-label="关闭这个人">×</button>
+          </div>
+          <h3 id="person-title">—</h3>
+          <p id="person-meta" class="person-card-meta">—</p>
+          <p class="person-card-id">编号 <span id="person-kind">—</span></p>
+          <p class="person-card-hint">点其他人可切换 · [ ] 浏览 · 跟随中可继续换人</p>
+          <div class="person-card-actions">
+            <button id="person-prev" class="view-button person-step" type="button" aria-label="上一位行人">‹</button>
+            <button id="person-follow" class="view-button" type="button">跟随这个人</button>
+            <button id="person-stop" class="view-button" type="button" hidden>停止跟随</button>
+            <button id="person-next" class="view-button person-step" type="button" aria-label="下一位行人">›</button>
+          </div>
+        </aside>
         <div class="frame-top-left frame-note" aria-hidden="true"><span class="drawing-cross">+</span> CITY STUDY <span class="note-slash">/</span> <span id="seed-label">20260818</span></div>
         <div class="frame-bottom-left frame-note"><span><b id="build-count">—</b> 层已落成</span><span><b id="tower-count">—</b> 组建筑</span></div>
         <div class="frame-bottom-right frame-note" aria-hidden="true"><span id="north-mark" class="north-mark">↑</span> N</div>
@@ -239,53 +259,48 @@
       <button id="show-ui" type="button" hidden aria-label="显示界面">界面 ×</button>
     </section>
   </main>
-  <script src="./vendor/p5.min.js"></script>
-  <script src="./vendor/three.min.js"></script>
-  <script src="./vendor/gltf-loader.min.js"></script>
-  <script src="./vendor/reflector.min.js"></script>
-  <script src="./city-random.js"></script>
-  <script src="./city-festival.js"></script>
-  <script src="./city-model.js"></script>
-  <script src="./assets/resident-town-runtime.min.js"></script>
-  <script src="./city-light.js"></script>
-  <script src="./city-materials.js"></script>
-  <script src="./assets/blender-landscape.js"></script>
-  <script src="./assets/blender-amusement.js"></script>
-  <script src="./city-fireworks.js"></script>
-  <script src="./city-fountain.js"></script>
-  <script src="./assets/city-ground.runtime.min.js"></script>
-  <script src="./city-playground.js"></script>
-  <script src="./assets/blender-district.js"></script>
-  <script src="./city-district.js"></script>
-  <script src="./assets/blender-civic.js"></script>
-  <script src="./assets/blender-hospital-room.js"></script>
-  <script src="./city-facilities.js"></script>
-  <script src="./city-places.js"></script>
-  <script src="./city-housing-plan.js"></script>
-  <script src="./city-frontage.js"></script>
-  <script src="./city-layout.js"></script>
-  <script src="./assets/blender-housing.js"></script>
-  <script src="./city-housing.js"></script>
-  <script src="./city-housing-canvas.js"></script>
-  <script src="./city-waterfront.js"></script>
-  <script src="./city-transit-motion.js"></script>
-  <script src="./city-transit.js"></script>
-  <script src="./city-landmarks.js"></script>
-  <script src="./city-helipad.js"></script>
-  <script src="./city-airship.js"></script>
+  <!-- assets/blender-*.js (~1.15 MB) are no longer in this chain: sketch.js fetches them
+       after the first frame and swaps in the detail pass when they land. -->
+  <script defer src="./vendor/three.min.js"></script>
+  <script defer src="./vendor/gltf-loader.min.js"></script>
+  <script defer src="./vendor/reflector.min.js"></script>
+  <script defer src="./city-random.js"></script>
+  <script defer src="./city-festival.js"></script>
+  <script defer src="./city-model.js"></script>
+  <script defer src="./assets/resident-town-runtime.min.js"></script>
+  <script defer src="./city-light.js"></script>
+  <script defer src="./city-materials.js?v=20261105-people5"></script>
+  <script defer src="./city-fireworks.js"></script>
+  <script defer src="./city-fountain.js"></script>
+  <script defer src="./assets/city-ground.runtime.min.js"></script>
+  <script defer src="./city-playground.js"></script>
+  <script defer src="./city-district.js"></script>
+  <script defer src="./city-facilities.js"></script>
+  <script defer src="./city-places.js"></script>
+  <script defer src="./city-housing-plan.js"></script>
+  <script defer src="./city-frontage.js"></script>
+  <script defer src="./city-layout.js"></script>
+  <script defer src="./city-housing.js"></script>
+  <script defer src="./city-housing-canvas.js"></script>
+  <script defer src="./city-waterfront.js"></script>
+  <script defer src="./city-transit-motion.js"></script>
+  <script defer src="./city-transit.js"></script>
+  <script defer src="./city-landmarks.js"></script>
+  <script defer src="./city-helipad.js"></script>
+  <script defer src="./city-airship.js"></script>
   <!-- The app owns cached resident plans; renderers only consume the clock and lighting views. -->
-  <script src="./city-life-ext/daily-clock.js"></script>
-  <script src="./city-life-ext/resident-name.js?v=20261006-rosters3"></script>
-  <script src="./city-life-ext/resident-schedule.js"></script>
-  <script src="./city-life-ext/resident.js"></script>
-  <script src="./city-life-ext/resident-plan.js"></script>
-  <script src="./city-life-ext/resident-state.js"></script>
-  <script src="./city-life-ext/plan-snapshot.js"></script>
-  <script src="./city-life-ext/town-view.js"></script>
-  <script src="./city-life-ext/lighting.js"></script>
-  <script src="./drone-show/solar-system.js"></script>
-  <script src="./city-scene.js"></script>
-  <script src="./sketch.js?v=20261009-deco1"></script>
+  <script defer src="./city-life-ext/daily-clock.js"></script>
+  <script defer src="./city-life-ext/resident-name.js?v=20261006-rosters3"></script>
+  <script defer src="./city-life-ext/resident-schedule.js"></script>
+  <script defer src="./city-life-ext/resident.js"></script>
+  <script defer src="./city-life-ext/resident-plan.js"></script>
+  <script defer src="./city-life-ext/resident-state.js"></script>
+  <script defer src="./city-life-ext/plan-snapshot.js"></script>
+  <script defer src="./city-life-ext/town-view.js"></script>
+  <script defer src="./city-life-ext/lighting.js"></script>
+  <script defer src="./drone-show/solar-system.js"></script>
+  <script defer src="./city-scene.js?v=20261105-people12"></script>
+  <script defer src="./sketch.js?v=20261105-people12"></script>
 
 
 </body>

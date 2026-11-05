@@ -1,8 +1,8 @@
 第三方组件与素材
 
 Three.js r180、Reflector、GLTFLoader：MIT；https://github.com/mrdoob/three.js/tree/r180
-p5.js 1.7.0：LGPL 2.1；本目录 p5-1.7.0.tgz 是官方原始分发包，含可读库源码 lib/p5.js 和许可证。
-本包运行库仅添加本地说明注释与末尾换行，其余代码与官方 npm 包一致。
+p5.js 1.7.0：LGPL 2.1；**运行库已不再使用**（2026-11-05 起由 sketch.js 自带的 createCanvasApp 取代）。
+本目录 p5-1.7.0.tgz 仅为存档保留，用于说明历史版本曾包含该组件；新构建不加载、不分发该文件。
 获取地址：https://registry.npmjs.org/p5/-/p5-1.7.0.tgz
 上游源码：https://github.com/processing/p5.js/tree/v1.7.0
 银河图片：ESO / S. Brunier；详见银河图片署名.txt。
