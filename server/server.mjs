@@ -12,6 +12,7 @@ import { readFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer } from 'ws';
@@ -72,6 +73,7 @@ const q = {
   addSession: db.prepare('INSERT INTO sessions (jti,uid,created,ua) VALUES (?,?,?,?)'),
   dropSession: db.prepare('DELETE FROM sessions WHERE jti = ?'),
   hasSession: db.prepare('SELECT 1 FROM sessions WHERE jti = ?'),
+  purgeSessions: db.prepare('DELETE FROM sessions WHERE created < ?'),
 };
 
 // ── 인증 ────────────────────────────────────────────────────────────────────
@@ -84,7 +86,10 @@ const PROFESSIONS = new Set([
 ]);
 const PALETTE = new Set(['#3f7fb0', '#c2554a', '#3f8f6a', '#8a6bb5', '#c98a2e', '#2f6f86', '#a8547a', '#4d6b3f']);
 const b64u = buf => Buffer.from(buf).toString('base64url');
-const hash = (pw, salt) => crypto.scryptSync(pw, salt, 64).toString('hex');
+// scryptSync 는 이벤트 루프를 잡습니다(실측: 20 동시 로그인에서 /api/health 2ms → 637ms).
+// libuv 스레드풀에서 도는 비동기 scrypt 로 바꿔 로그인 폭주가 위치 패킷을 세우지 않게 합니다.
+const scryptAsync = promisify(crypto.scrypt);
+const hash = async (pw, salt) => (await scryptAsync(pw, salt, 64)).toString('hex');
 
 function sign(payload) {
   const head = b64u(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
@@ -107,6 +112,16 @@ function verify(token) {
 }
 function publicUser(row) {
   return { id: row.id, email: row.email, nickname: row.nickname, prof: row.prof, color: row.color };
+}
+// 서명·만료 검증만으로는 로그아웃이 무효입니다(세션 행을 지워도 토큰이 계속 통함).
+// jti 를 세션 테이블과 대조해야 /api/logout 이 실제로 세션을 끊습니다.
+// 토큰 검증은 REST 요청 1회·WS 업그레이드 1회뿐이라 조회 비용이 문제되지 않습니다.
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+function authed(token) {
+  const claims = verify(token);
+  if (!claims || !claims.jti) return null;
+  if (!q.hasSession.get(claims.jti)) return null;
+  return claims;
 }
 
 // ── 입력 검증 ───────────────────────────────────────────────────────────────
@@ -190,7 +205,7 @@ const server = createServer(async (req, res) => {
         const salt = crypto.randomBytes(16).toString('hex');
         const id = crypto.randomUUID();
         const now = Date.now();
-        q.insert.run(id, email, hash(password, salt), salt, nickname, prof, color, now, now);
+        q.insert.run(id, email, await hash(password, salt), salt, nickname, prof, color, now, now);
         const jti = crypto.randomUUID();
         q.addSession.run(jti, id, now, String(req.headers['user-agent'] || '').slice(0, 120));
         const token = sign({ uid: id, jti, iat: Math.floor(now / 1000), exp: Math.floor(now / 1000) + 60 * 60 * 24 * 30 });
@@ -204,7 +219,7 @@ const server = createServer(async (req, res) => {
         const email = String(b.email || '').trim().toLowerCase();
         const row = q.byEmail.get(email);
         if (!row) return send(res, 401, { error: '이메일 또는 비밀번호가 맞지 않습니다.' });
-        const given = Buffer.from(hash(String(b.password || ''), row.salt), 'hex');
+        const given = Buffer.from(await hash(String(b.password || ''), row.salt), 'hex');
         const saved = Buffer.from(row.pass_hash, 'hex');
         if (given.length !== saved.length || !crypto.timingSafeEqual(given, saved)) {
           return send(res, 401, { error: '이메일 또는 비밀번호가 맞지 않습니다.' });
@@ -229,7 +244,7 @@ const server = createServer(async (req, res) => {
         return send(res, 200, { zones: zoneSummary(), online: players.size });
       }
 
-      const claims = verify((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
+      const claims = authed((req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
       if (!claims) return send(res, 401, { error: '로그인이 필요합니다.' });
 
       if (url.pathname === '/api/me' && req.method === 'GET') {
@@ -285,12 +300,13 @@ const server = createServer(async (req, res) => {
 // ── 접속자 동기화 ───────────────────────────────────────────────────────────
 const WORLD = 560;            // 마을 반경(플랜 좌표 기준 여유값)
 const CELL = 100;             // 공간 해시 셀
-const SEE = 120;              // 이 거리 안의 사람만 서로 보입니다(같은 존 안에서만)
-const HEAR = 120;             // 채팅 반경
+const SEE = 50;               // 이 거리 안의 사람만 서로 보입니다(같은 존 안에서만)
+const HEAR = 60;              // 채팅 반경 — 보이는 사람과 대화 반경을 맞춥니다
+const NEAR_LIMIT = 24;        // 한 사람이 동시에 볼 수 있는 최대 인원(가까운 순)
 const SEND_HZ = 8;            // 서버 브로드캐스트 상한(클라이언트는 보간으로 부드럽게 그림)
 const STILL_EPS = 0.01;       // 이보다 덜 움직였으면 위치 패킷을 보내지 않습니다
 const ZONE_SPAN = (WORLD * 2) / 3;   // 3x3 존 한 칸의 폭
-const ZONE_CAP = 130;         // 존 정원 — 9존 × 130 = 1,170 (목표 1,000명 + 여유)
+const ZONE_CAP = Number(process.env.ZONE_CAP || 130);   // 존 정원 — 테스트용으로 낮출 수 있습니다
 const ZONE_NAMES = [
   ['西北', '西北 · 住宅'], ['北 · 学园', '北 · 学园'], ['东北', '东北 · 河岸'],
   ['西 · 市场', '西 · 市场'], ['中央广场', '中央广场'], ['东 · 写字楼', '东 · 写字楼'],
@@ -298,7 +314,7 @@ const ZONE_NAMES = [
 ];
 const cells = new Map();      // "cx,cz" -> Set<player>
 const players = new Map();    // id -> player
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 });  // 클라 메시지는 최대 ~200B
 
 // ── 존(구역) ────────────────────────────────────────────────────────────────
 // 접속자는 좌표로 존이 정해지고, 위치·채팅 브로드캐스트는 같은 존 안에서만
@@ -384,6 +400,14 @@ function zoneInfo(p) {
   const zone = zoneById.get(p.zoneId);
   return zone ? { t: 'zone', id: zone.id, name: zone.name, count: zone.count, capacity: zone.capacity } : null;
 }
+// 시야 안 인원이 많아도 패킷은 (인원-1)×8Hz 로 제곱이 아니라 선형으로 늘지만,
+// 밀집 구간(존 정원 130명)에서는 그 선형값 자체가 큽니다. 가까운 NEAR_LIMIT 명만 남깁니다.
+function visible(p) {
+  const list = neighbours(p, SEE);
+  if (list.length <= NEAR_LIMIT) return list;
+  list.sort((a, b) => ((a.x - p.x) ** 2 + (a.z - p.z) ** 2) - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+  return list.slice(0, NEAR_LIMIT);
+}
 function enterZone(p, zone) {
   p.zoneId = zone.id;
   zone.count += 1;
@@ -392,13 +416,6 @@ function leaveZone(p) {
   const zone = zoneById.get(p.zoneId);
   if (zone) zone.count = Math.max(0, zone.count - 1);
   p.zoneId = null;
-}
-function zonePeers(p) {
-  const out = [];
-  for (const other of players.values()) {
-    if (other !== p && other.zoneId === p.zoneId) out.push(other);
-  }
-  return out;
 }
 function tell(target, msg) {
   if (target.ws.readyState === 1) {
@@ -409,7 +426,7 @@ function broadcastProfile(uid, patch) {
   const p = players.get(uid);
   if (!p) return;
   Object.assign(p, patch);
-  for (const other of neighbours(p, SEE)) tell(other, { t: 'who', id: p.id, ...patch });
+  for (const other of visible(p)) tell(other, { t: 'who', id: p.id, ...patch });
 }
 
 function onMessage(p, raw) {
@@ -420,22 +437,37 @@ function onMessage(p, raw) {
   if (msg.t === 'pos') {
     const x = Number(msg.x), z = Number(msg.z), h = Number(msg.h);
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
-    p.x = Math.max(-WORLD, Math.min(WORLD, x));
-    p.z = Math.max(-WORLD, Math.min(WORLD, z));
+    const nx = Math.max(-WORLD, Math.min(WORLD, x));
+    const nz = Math.max(-WORLD, Math.min(WORLD, z));
+    const zone = zoneAt(nx, nz);
+
+    // 만원 존은 입장을 거부합니다. 좌표만 옮기면 정원을 넘길 수 있다면 capacity 는
+    // 보장이 아니라 배정 힌트일 뿐입니다(콘솔 텔레포트 한 줄로 우회됨).
+    if (zone.id !== p.zoneId && zone.count >= zone.capacity) {
+      const now = Date.now();
+      if (now - (p.lastFullNotice || 0) > 4000) {
+        p.lastFullNotice = now;
+        tell(p, { t: 'zonefull', id: zone.id, name: zone.name, count: zone.count, capacity: zone.capacity, x: p.x, z: p.z });
+      }
+      return;
+    }
+
+    // 존을 넘기기 전에 "지금 나를 보고 있는 사람"을 먼저 구합니다(이동하면 좌표가 바뀝니다).
+    const oldPeers = zone.id !== p.zoneId && p.zoneId ? visible(p) : null;
+
+    p.x = nx; p.z = nz;
     p.h = Number.isFinite(h) ? h : p.h;
     p.anim = typeof msg.a === 'string' ? msg.a.slice(0, 12) : p.anim;
     const k = cellKey(p.x, p.z);
     if (k !== p.cell) { dropCell(p); addCell(p); }
 
     // 존 경계를 넘으면 이전 존 사람들에게서 사라지고 새 존 사람들에게 나타납니다.
-    const zone = zoneAt(p.x, p.z);
     if (zone.id !== p.zoneId) {
-      const oldPeers = zonePeers(p);
       if (p.zoneId) for (const other of oldPeers) tell(other, { t: 'leave', id: p.id });
       leaveZone(p);
       enterZone(p, zone);
       const hello = { t: 'join', id: p.id, nickname: p.nickname, prof: p.prof, color: p.color, x: p.x, z: p.z, h: p.h };
-      for (const other of zonePeers(p)) tell(other, hello);
+      for (const other of visible(p)) tell(other, hello);
       tell(p, zoneInfo(p));
     }
 
@@ -451,7 +483,7 @@ function onMessage(p, raw) {
     p.sentX = p.x; p.sentZ = p.z; p.sentAnim = p.anim;
     // 한 번만 직렬화해 여러 명에게 그대로 보냅니다(수신자 수만큼 stringify 하지 않음).
     const packet = JSON.stringify({ t: 'pos', id: p.id, x: +p.x.toFixed(2), z: +p.z.toFixed(2), h: +p.h.toFixed(2), a: p.anim });
-    for (const other of neighbours(p, SEE)) tell(other, packet);
+    for (const other of visible(p)) tell(other, packet);
     return;
   }
 
@@ -470,16 +502,19 @@ function onMessage(p, raw) {
   if (msg.t === 'emote') {
     const kind = String(msg.kind || '').slice(0, 12);
     if (!['wave', 'jump', 'dance'].includes(kind)) return;
+    const now = Date.now();
+    if (now - (p.lastEmote || 0) < 500) return;      // 연타로 시야 내 전원에게 방송되는 것을 막습니다
+    p.lastEmote = now;
     const packet = { t: 'emote', id: p.id, kind };
     tell(p, packet);
-    for (const other of neighbours(p, SEE)) tell(other, packet);
+    for (const other of visible(p)) tell(other, packet);
   }
 }
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname !== '/ws') return socket.destroy();
-  const claims = verify(url.searchParams.get('token') || '');
+  const claims = authed(url.searchParams.get('token') || '');
   if (!claims) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     return socket.destroy();
@@ -501,7 +536,12 @@ wss.on('connection', (ws, req, row) => {
     players.delete(row.id);
   }
   // 빈 존부터 채워 넣습니다 — 1,000명이 한 점에 몰려도 존마다 상한이 지켜집니다.
+  // 모든 존이 만원이면 접속을 거부합니다(정원이 배정 힌트로 전락하지 않도록).
   const zone = leastFullZone();
+  if (zone.count >= zone.capacity) {
+    try { ws.close(4001, 'town full'); } catch {}
+    return;
+  }
   const spot = spawnPoint(zone);
   const p = {
     id: row.id, nickname: row.nickname, prof: row.prof, color: row.color,
@@ -515,18 +555,22 @@ wss.on('connection', (ws, req, row) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
-  const nearby = neighbours(p, SEE).map(o => ({ id: o.id, nickname: o.nickname, prof: o.prof, color: o.color, x: o.x, z: o.z, h: o.h, a: o.anim }));
+  const nearby = visible(p).map(o => ({ id: o.id, nickname: o.nickname, prof: o.prof, color: o.color, x: o.x, z: o.z, h: o.h, a: o.anim }));
   tell(p, {
     t: 'welcome', id: p.id, nickname: p.nickname, x: p.x, z: p.z, h: p.h, now: Date.now(),
     online: players.size, players: nearby,
     spawn: { x: p.x, z: p.z }, zone: zoneInfo(p), zones: zoneSummary(),
   });
   const hello = { t: 'join', id: p.id, nickname: p.nickname, prof: p.prof, color: p.color, x: p.x, z: p.z, h: p.h };
-  for (const other of neighbours(p, SEE)) tell(other, hello);
+  for (const other of visible(p)) tell(other, hello);
 
   ws.on('message', raw => onMessage(p, raw.toString()));
   ws.on('close', () => {
-    const peers = zonePeers(p);
+    // 같은 계정이 새로 접속하면 서버가 옛 소켓을 close(4000) 합니다. 그 close 가 나중에
+    // 도착하는데, 그때 players 안에는 "새" 접속자가 들어 있습니다. identity 를 확인하지 않고
+    // 지우면 새 접속자가 맵에서 사라져 고스트가 됩니다(online 0, 존 카운터만 남음).
+    if (players.get(p.id) !== p) return;
+    const peers = visible(p);
     players.delete(p.id);
     leaveZone(p);
     dropCell(p);
@@ -547,6 +591,11 @@ const heartbeat = setInterval(() => {
   const summary = zoneSummary();
   for (const p of players.values()) tell(p, { t: 'online', n: players.size, zones: summary });
 }, 15_000);
+// 만료된 세션 행 정리 — 로그아웃하지 않고 버려진 토큰이 sessions 에 계속 쌓이는 것을 막습니다.
+const sessionSweeper = setInterval(() => {
+  try { q.purgeSessions.run(Date.now() - SESSION_TTL_MS); } catch {}
+}, 60 * 60 * 1000);
+q.purgeSessions.run(Date.now() - SESSION_TTL_MS);
 
 server.listen(PORT, () => {
   console.log(`[大连town] http://localhost:${PORT}  (static: ${ROOT})`);
@@ -554,7 +603,7 @@ server.listen(PORT, () => {
 });
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
-    clearInterval(sweeper); clearInterval(heartbeat);
+    clearInterval(sweeper); clearInterval(heartbeat); clearInterval(sessionSweeper);
     for (const p of players.values()) { try { p.ws.close(1001, 'server stop'); } catch {} }
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1500);

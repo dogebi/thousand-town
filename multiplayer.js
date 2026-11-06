@@ -269,7 +269,8 @@
     socket.onopen = () => {
       state.connected = true; state.retry = 0;
       setStatus(`${state.user.nickname} · 접속됨`, true);
-      sendPos(true);
+      // welcome 을 받은 뒤에 첫 pos 를 보냅니다. 그 전에 보내면 서버가 배정한 스폰과
+      // 클라 좌표가 어긋나 잠깐 남의 화면에 엉뚱한 자리로 보입니다.
     };
     socket.onmessage = event => {
       let msg;
@@ -290,7 +291,14 @@
           if (Array.isArray(msg.zones)) state.zones = msg.zones;
           for (const p of msg.players || []) upsertRemote(p);
           refreshHud();
+          sendPos(true);            // welcome 으로 확정된 좌표를 서버에 알립니다
           log(`마을에 들어왔습니다 · ${state.zone ? state.zone.name + ' · ' : ''}지금 ${state.online}명`, true);
+          break;
+        case 'zonefull':
+          // 서버가 만원 존 입장을 거부했습니다 — 서버가 알려준 좌표로 되돌립니다.
+          state.me.x = Number(msg.x) || 0; state.me.z = Number(msg.z) || 0; state.me.target = null;
+          if (selfGroup) selfGroup.position.set(state.me.x, 0, state.me.z);
+          log(`${escapeHtml(msg.name)} 구역이 가득 찼습니다 (${msg.count}/${msg.capacity})`, true);
           break;
         case 'zone':
           state.zone = { id: msg.id, name: msg.name, count: msg.count, capacity: msg.capacity };
@@ -326,13 +334,63 @@
           break;
       }
     };
-    socket.onclose = () => {
+    socket.onclose = event => {
       state.socket = null; state.connected = false;
+      const code = event ? event.code : 0;
+      if (!state.token) return;                       // 로그아웃/중복 정리로 닫은 경우
+      if (code === 4000) {                            // 같은 계정이 다른 곳에서 접속
+        signOutLocal();
+        setStatus('다른 곳에서 접속', false);
+        openPanel('login');
+        log('같은 계정으로 다른 곳에서 접속해 연결을 닫았습니다.', true);
+        return;
+      }
+      if (code === 4001) {                            // 마을 정원 초과 — 세션은 유지하고 나중에 재시도
+        if ($hud) $hud.classList.add('hidden');
+        setStatus('자리 가득 · 60초 후 재시도', false);
+        log('마을 정원이 가득 찼습니다. 잠시 후 다시 시도합니다.', true);
+        setTimeout(() => { if (state.token && !state.socket) connect(); }, 60000);
+        return;
+      }
+      if (code === 1008) {                            // 인증 실패·폐기된 세션
+        signOutLocal();
+        setStatus('다시 로그인해 주세요', false);
+        openPanel('login');
+        return;
+      }
       setStatus('연결 끊김 · 다시 시도 중', false);
+      // 1006(업그레이드 거부 = 401)이 반복되면 토큰이 죽었을 수 있으니 재검증합니다.
+      if (state.retry >= 3 && !state.revalidating) revalidate();
       const delay = Math.min(15000, 1200 * Math.pow(1.8, state.retry++));
       setTimeout(() => { if (state.token) connect(); }, delay);
     };
     socket.onerror = () => {};
+  }
+
+  // 세션 정리(서버 호출 없이 로컬만) — 로그아웃·중복 접속·인증 실패에서 함께 씁니다.
+  function signOutLocal() {
+    for (const remote of [...state.remotes.values()]) removeRemote(remote.id);
+    if (selfGroup && scene) { scene.remove(selfGroup); disposeGroup(selfGroup); }
+    selfGroup = null; selfRing = null;
+    state.token = null; state.user = null; state.connected = false;
+    state.online = 0; state.ready = false; state.retry = 0;
+    try { localStorage.removeItem(TOKEN_KEY); } catch {}
+    if ($hud) $hud.classList.add('hidden');
+  }
+
+  // 끊김이 길어질 때 토큰이 아직 유효한지 서버에 확인합니다.
+  async function revalidate() {
+    state.revalidating = true;
+    try {
+      const body = await api('/api/me');
+      state.user = body.user;
+    } catch {
+      signOutLocal();
+      setStatus('다시 로그인해 주세요', false);
+      openPanel('login');
+    } finally {
+      state.revalidating = false;
+    }
   }
 
   function send(payload) {
@@ -750,14 +808,14 @@
   }
 
   function logout() {
-    try { fetch(API + '/api/logout', { method: 'POST', headers: { authorization: 'Bearer ' + state.token } }); } catch {}
-    try { localStorage.removeItem(TOKEN_KEY); } catch {}
-    if (state.socket) { state.socket.close(); state.socket = null; }
-    for (const remote of [...state.remotes.values()]) removeRemote(remote.id);
-    if (selfGroup && scene) { scene.remove(selfGroup); disposeGroup(selfGroup); }
-    selfGroup = null; selfRing = null;
-    state.token = null; state.user = null; state.connected = false; state.online = 0;
-    $hud.classList.add('hidden');
+    const token = state.token;
+    if (token) {
+      try { fetch(API + '/api/logout', { method: 'POST', headers: { authorization: 'Bearer ' + token } }).catch(() => {}); } catch {}
+    }
+    const socket = state.socket;
+    state.socket = null;
+    if (socket) { try { socket.close(1000, 'bye'); } catch {} }
+    signOutLocal();
     setStatus('登录 · 多人', false);
     log('로그아웃했습니다', true);
   }

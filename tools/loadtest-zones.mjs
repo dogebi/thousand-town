@@ -41,6 +41,8 @@ function sign(payload) {
 const db = new DatabaseSync(DB_PATH);
 const insert = db.prepare(`INSERT OR IGNORE INTO users (id,email,pass_hash,salt,nickname,prof,color,created_at,seen_at)
                            VALUES (?,?,?,?,?,?,?,?,?)`);
+// 서버가 jti 를 세션 테이블과 대조하므로 부하 계정도 세션 행이 있어야 접속됩니다.
+const addSession = db.prepare('INSERT OR IGNORE INTO sessions (jti,uid,created,ua) VALUES (?,?,?,?)');
 const PROF = ['office', 'worker', 'shopkeeper', 'driver', 'teacher', 'clerk', 'officer',
   'school-admin', 'medical-doc', 'medical-nurse', 'hosp-admin', 'sanitation',
   'student-p', 'student-m', 'student-u', 'preschooler', 'unemployed', 'retiree', 'senior', 'patient'];
@@ -54,6 +56,7 @@ for (let i = 0; i < COUNT; i++) {
   insert.run(crypto.randomUUID(), email, '00'.repeat(64), '00'.repeat(16), nick, PROF[i % PROF.length], COLOR[i % COLOR.length], now, now);
   const { id } = pickId.get(email);          // 재실행 시 기존 행의 id를 그대로 씁니다
   const jti = crypto.randomUUID();
+  addSession.run(jti, id, now, 'loadtest');
   users.push({ id, nick, token: sign({ uid: id, jti, iat: Math.floor(now / 1000), exp: Math.floor(now / 1000) + 3600 }) });
 }
 db.close();
