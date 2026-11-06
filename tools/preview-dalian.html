@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>大连 랜드마크 프리뷰</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #dfe7ea; font-family: system-ui, sans-serif; }
+  #views { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .tag { position: absolute; color: #23343b; font-size: 12px; font-weight: 600; padding: 4px 8px; }
+</style>
+<div id="views"></div>
+<script src="../vendor/three.min.js"></script>
+<script src="../city-dalian.js"></script>
+<script src="../city-places.js"></script>
+<script>
+  // 마을 플랜 없이 랜드마크만 렌더 — 배치 검수용
+  const plan = { buildings: [], facilities: [], places: [], roads: [], water: { x: 0, z: 0, w: 30, d: 516 } };
+  const shots = [
+    { name: '中山广场 전체', dist: 120, elev: 95, target: [231, 0, 20] },
+    { name: '中山广场 중앙', dist: 34, elev: 16, target: [231, 3, 20] },
+    { name: '星海广场 华表', dist: 44, elev: 22, target: [231, 10, -160] },
+    { name: '星海广场 百年城雕', dist: 34, elev: 14, target: [209, 2, -140] },
+    { name: '友好广场 水晶球', dist: 26, elev: 12, target: [231, 5, 100] },
+    { name: '201 电车 · 兴工街', dist: 24, elev: 8, target: [30, 3.5, 0], time: 0.5 }
+  ];
+  const host = document.getElementById('views');
+  shots.forEach((shot) => {
+    const wrap = document.createElement('div');
+    wrap.style.position = 'relative';
+    host.appendChild(wrap);
+    const canvas = document.createElement('canvas');
+    wrap.appendChild(canvas);
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = shot.name;
+    wrap.appendChild(tag);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(1);
+    renderer.setSize(480, 360, false);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#dfe7ea');
+    const camera = new THREE.PerspectiveCamera(38, 480 / 360, 1, 2000);
+    camera.position.set(shot.target[0] + shot.dist * 0.7, shot.elev, shot.target[2] + shot.dist);
+    camera.lookAt(new THREE.Vector3(...shot.target));
+    scene.add(new THREE.HemisphereLight('#ffffff', '#7d8a80', 0.95));
+    const sun = new THREE.DirectionalLight('#fff6e4', 0.85);
+    sun.position.set(120, 220, 160);
+    scene.add(sun);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(700, 700), new THREE.MeshStandardMaterial({ color: '#c9d2cc' }));
+    ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02;
+    scene.add(ground);
+
+    const controller = CityDalian.create(THREE, {}, plan);
+    scene.add(controller.group);
+    controller.update(Number.isFinite(shot.time) ? shot.time : 12);
+    renderer.render(scene, camera);
+  });
+  window.__ready = true;
+</script>
+</html>

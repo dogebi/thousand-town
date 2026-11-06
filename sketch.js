@@ -1585,6 +1585,11 @@
       else plane(b.x,b.z,b.w+6,b.d+6,.24,'#f2f0e5');
     }
     for(const place of city.places||[])publicPlaceGround(place);
+    // 大连 랜드마크(星海·中山·友好 광장 + 101/201/202 전차) — 2D 폴백 렌더러에도 같은 배치를 그립니다.
+    if(typeof CityDalian!=='undefined'&&CityDalian.draw2D){
+      try{CityDalian.draw2D({ctx,point,plane,cuboid,line,polygon,view},time);}
+      catch(error){if(!CityDalian.__warned){CityDalian.__warned=true;console.warn('CityDalian 2D draw failed',error);}}
+    }
     const water=city.water;
     plane(0,0,water.w+8,water.d+1,.2,'#e1e5d7');
     const wg=ctx.createLinearGradient(...point(-16,-168,-1),...point(16,168,-1));
