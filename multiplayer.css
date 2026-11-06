@@ -102,8 +102,9 @@
   padding: 0;
 }
 .mp-emoji button:hover { border-color: #0e4c63; }
-.mp-tools { display: flex; gap: 6px; margin-top: 7px; }
-.mp-tools .mp-btn { padding: 7px 9px; font-size: 11.5px; flex: 1; justify-content: center; }
+.mp-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.mp-tools .mp-btn { padding: 7px 9px; font-size: 11.5px; flex: 1 1 40%; justify-content: center; }
+.mp-tools .mp-btn.on { background: #e6eff1; border-color: #0e4c63; color: #0e4c63; }
 
 #mp-panel {
   position: fixed;

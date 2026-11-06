@@ -548,6 +548,8 @@
 
   function applyHeldKeys(dt){
     if(dt<=0)return;
+    // 접속자 1인칭 걷기 중에는 카메라 자유비행을 멈춥니다(WASD 는 아바타가 받습니다).
+    if(window.__fpsWalk)return;
     const boost=shiftHeld?2.5:1;
     function step(axis,want,speed){
       const target=want*speed*boost,ease=1-Math.exp(-dt*(want?18:28));
@@ -2169,6 +2171,7 @@
     });
     document.addEventListener('mousemove',e=>{
       if(controlMode!=='fps'||document.pointerLockElement!==stage)return;
+      if(window.__fpsWalk)return;   // 1인칭 걷기 중에는 아바타 시점이 마우스를 받습니다
       // FPS 瞄准约定：鼠标向右看右（与环绕拖拽的「抓取世界」方向相反，故 yaw 取负）
       state.yaw-=e.movementX*.0026;targets=null;markView(null);
       const wanted=state.pitch+state.cameraPitch+e.movementY*.0022,next=clamp(wanted,LOOK_PITCH_MIN,LOOK_PITCH_MAX);
@@ -2641,6 +2644,11 @@
     scene:()=>physicalScene?physicalScene.scene:null,
     camera:()=>physicalScene?physicalScene.camera:null,
     stageRect:()=>{const r=$('stage').getBoundingClientRect();return {x:r.left,y:r.top,width:r.width,height:r.height};},
+    // 1인칭 걷기: 조작 모드 전환과 포인터 락 대상 엘리먼트를 열어 줍니다.
+    stageElement:()=>$('stage'),
+    controlMode:()=>controlMode,
+    setControlMode:mode=>{setControlMode(mode);return controlMode;},
+    setFirstPerson:pose=>{if(physicalScene)physicalScene.setFirstPerson(pose);},
     buildingScreenPoint:id=>physicalScene&&physicalScene.projectBuilding(id,sketch.width,sketch.height),
     townState:()=>{const v=refreshTown();return JSON.parse(JSON.stringify({...v,demand:undefined,proxyCounts:CityLife.countPeople(CityLife.sample(life,state.daySeconds,v.demand))}));},
     exportSnapshot:()=>CityPlanSnapshots.serialize(currentSnapshot()),

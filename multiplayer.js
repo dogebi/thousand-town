@@ -39,6 +39,9 @@
   const COLORS = ['#3f7fb0', '#c2554a', '#3f8f6a', '#8a6bb5', '#c98a2e', '#2f6f86', '#a8547a', '#4d6b3f'];
   const SEND_HZ = 12;
   const SPEED = 4.4;          // m/s — 마을 사람 보행보다 살짝 빠르게
+  const EYE_HEIGHT = 2.7;     // 1인칭 눈높이(씬 단위, 주민 키 3.05)
+  const LOOK_SPEED = 0.0026;  // 마우스 1px 당 회전(rad)
+  const PITCH_LIMIT = 1.22;
   const TOWN_PERSON_HEIGHT = 3.05;   // 마을 주민 키(씬 단위)에 아바타를 맞춥니다
   const OFFLINE = location.protocol === 'file:' && !window.TOWN_API;
 
@@ -46,6 +49,8 @@
     token: null, user: null, socket: null, connected: false, online: 0,
     zone: null, zones: [],
     me: { x: 0, z: 0, h: 0, anim: 'idle', target: null, spawn: null },
+    // 1인칭 걷기: want=사용자가 켬, active=실제 조종 중(포인터 락 여부와 무관하게 진입)
+    fps: { active: false, want: false, yaw: 0, pitch: 0, keys: new Set(), shift: false },
     remotes: new Map(), retry: 0, ready: false,
   };
   let $panel, $hud, $log, $chat, $launch, $error, draft = { mode: 'login', prof: 'office', color: COLORS[0] };
@@ -369,6 +374,7 @@
 
   // 세션 정리(서버 호출 없이 로컬만) — 로그아웃·중복 접속·인증 실패에서 함께 씁니다.
   function signOutLocal() {
+    if (state.fps.active || state.fps.want) exitFirstPerson(true);
     for (const remote of [...state.remotes.values()]) removeRemote(remote.id);
     if (selfGroup && scene) { scene.remove(selfGroup); disposeGroup(selfGroup); }
     selfGroup = null; selfRing = null;
@@ -457,6 +463,103 @@
     group.userData.emote = { kind, t: 0 };
   }
 
+  // ── 1인칭 걷기 ────────────────────────────────────────────────────────────
+  // sketch.js 의 fps 모드는 카메라만 자유비행합니다. 여기서는 WASD 가 "내 아바타"를
+  // 움직이고 카메라를 그 눈높이에 붙입니다. 그래서 다른 접속자에게도 같은 자리로 보입니다.
+  const wrapAngle = angle => Math.atan2(Math.sin(angle), Math.cos(angle));
+  function fpsApi() {
+    return window.cityStudio && typeof window.cityStudio.setFirstPerson === 'function' ? window.cityStudio : null;
+  }
+
+  function startFirstPerson() {
+    if (!state.user) { openPanel('login'); return; }
+    if (state.fps.active) { exitFirstPerson(); return; }
+    if (!state.ready || !fpsApi()) { log('마을 화면이 준비된 뒤에 1인칭을 켤 수 있습니다.', true); return; }
+    state.fps.want = true;
+    state.fps.yaw = wrapAngle(state.me.h - Math.PI);   // 지금 아바타가 보는 방향에서 시작
+    state.fps.pitch = 0;
+    state.me.target = null;
+    state.fps.prevMode = window.cityStudio.controlMode ? window.cityStudio.controlMode() : 'orbit';
+    if (window.cityStudio.setControlMode) window.cityStudio.setControlMode('fps');
+    // 포인터 락은 되면 쓰고, 거부당해도(터치·임베드) 걷기는 그대로 동작합니다.
+    const stage = window.cityStudio.stageElement ? window.cityStudio.stageElement() : null;
+    try {
+      const request = stage && stage.requestPointerLock && stage.requestPointerLock();
+      if (request && request.catch) request.catch(() => {});
+    } catch {}
+    enterFirstPerson();
+  }
+
+  function enterFirstPerson() {
+    if (!state.fps.want || state.fps.active) return;
+    state.fps.active = true;
+    state.fps.keys.clear(); state.fps.shift = false;
+    window.__fpsWalk = true;                    // sketch.js 의 카메라 WASD·마우스 룩을 잠급니다
+    if (selfGroup) selfGroup.visible = false;   // 1인칭이므로 내 몸·이름표를 숨깁니다
+    state.me.target = null;
+    setStatus('1인칭 걷기 · WASD · Esc 나가기', true);
+    log('1인칭 걷기 — WASD 이동, Shift 달리기, 마우스 시점, Esc 나가기', true);
+    refreshHud();
+  }
+
+  function exitFirstPerson(quiet) {
+    const was = state.fps.active || state.fps.want;
+    state.fps.want = false; state.fps.active = false;
+    state.fps.keys.clear(); state.fps.shift = false;
+    window.__fpsWalk = false;
+    const api = fpsApi();
+    if (api) api.setFirstPerson(null);
+    if (selfGroup) selfGroup.visible = true;
+    state.me.anim = 'idle';
+    // 조작 모드를 원래대로 돌려놓습니다(1인칭은 fps 모드를 빌려 쓰므로).
+    if (api && api.setControlMode) api.setControlMode(state.fps.prevMode === 'fps' ? 'orbit' : (state.fps.prevMode || 'orbit'));
+    if (state.user) sendPos(true);
+    if (state.user && api && api.flyTo) api.flyTo(state.me.x, state.me.z, 5.2, 0.62, wrapAngle(state.me.h - Math.PI), 2);
+    if (was) {
+      if (!quiet) {
+        setStatus(`${state.user ? state.user.nickname + ' · ' : ''}${state.connected ? '접속됨' : '연결 중'}`, state.connected);
+        log('1인칭 걷기를 끝냈습니다', true);
+      }
+      refreshHud();
+    }
+  }
+
+  // WASD → 아바타 이동. 반환값은 "이번 프레임에 움직였는가".
+  function stepFirstPerson(dt) {
+    const f = state.fps;
+    const held = code => (f.keys.has(code) ? 1 : 0);
+    const forward = Math.min(1, held('KeyW') + held('ArrowUp')) - Math.min(1, held('KeyS') + held('ArrowDown'));
+    const side = Math.min(1, held('KeyD') + held('ArrowRight')) - Math.min(1, held('KeyA') + held('ArrowLeft'));
+    const sin = Math.sin(f.yaw), cos = Math.cos(f.yaw);
+    // world forward = (sinθ, cosθ). 화면 기준 오른쪽은 (-cosθ, sinθ) 입니다
+    // (카메라가 +z 를 바라볼 때 three.js 의 화면 오른쪽은 -x).
+    let dx = sin * forward - cos * side;
+    let dz = cos * forward + sin * side;
+    const length = Math.hypot(dx, dz);
+    if (length < 0.001) return false;
+    const step = SPEED * (f.shift ? 1.9 : 1) * dt;
+    const nx = state.me.x + (dx / length) * step;
+    const nz = state.me.z + (dz / length) * step;
+    let moved = false;
+    if (!blocked(nx, nz)) { state.me.x = nx; state.me.z = nz; moved = true; }
+    else {                                       // 벽에 막히면 축별로 시도해 미끄러집니다
+      if (!blocked(nx, state.me.z)) { state.me.x = nx; moved = true; }
+      if (!blocked(state.me.x, nz)) { state.me.z = nz; moved = true; }
+    }
+    state.me.x = clamp(state.me.x, -520, 520);
+    state.me.z = clamp(state.me.z, -520, 520);
+    // 몸은 바라보는 방향을 향합니다(모델 기준 h = yaw + π).
+    state.me.h = wrapAngle(f.yaw + Math.PI);
+    state.me.anim = moved ? 'walk' : 'idle';
+    return moved;
+  }
+
+  function syncFirstPersonCamera() {
+    const api = fpsApi();
+    if (!api) return;
+    api.setFirstPerson({ x: state.me.x, y: EYE_HEIGHT, z: state.me.z, yaw: state.fps.yaw, pitch: state.fps.pitch });
+  }
+
   // ── 매 프레임 ─────────────────────────────────────────────────────────────
   function frame(now) {
     requestAnimationFrame(frame);
@@ -480,31 +583,36 @@
     if (!selfGroup) return;
 
     let moving = false;
-    const goal = state.me.target;
-    if (goal) {
-      const dx = goal.x - state.me.x, dz = goal.z - state.me.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 0.35) {
-        state.me.target = null;
-        state.me.anim = 'idle';
-      } else {
-        const step = Math.min(dist, SPEED * dt);
-        const nx = state.me.x + (dx / dist) * step;
-        const nz = state.me.z + (dz / dist) * step;
-        if (!blocked(nx, nz) || dist < 0.9) {
-          state.me.x = nx; state.me.z = nz;
-          moving = true;
-          state.me.h = Math.atan2(dx, dz) + Math.PI;
-          state.me.anim = 'walk';
-        } else {
+    if (state.fps.active) {
+      moving = stepFirstPerson(dt);
+    } else {
+      const goal = state.me.target;
+      if (goal) {
+        const dx = goal.x - state.me.x, dz = goal.z - state.me.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.35) {
           state.me.target = null;
           state.me.anim = 'idle';
+        } else {
+          const step = Math.min(dist, SPEED * dt);
+          const nx = state.me.x + (dx / dist) * step;
+          const nz = state.me.z + (dz / dist) * step;
+          if (!blocked(nx, nz) || dist < 0.9) {
+            state.me.x = nx; state.me.z = nz;
+            moving = true;
+            state.me.h = Math.atan2(dx, dz) + Math.PI;
+            state.me.anim = 'walk';
+          } else {
+            state.me.target = null;
+            state.me.anim = 'idle';
+          }
         }
       }
     }
     selfGroup.position.set(state.me.x, 0, state.me.z);
     selfGroup.rotation.y = state.me.h;
-    animateAvatar(selfGroup, moving, dt);
+    if (state.fps.active) syncFirstPersonCamera();
+    else animateAvatar(selfGroup, moving, dt);
     if (moving) sendPos(false);
     else if (now - lastSend > 3000) sendPos(true);
 
@@ -552,6 +660,7 @@
   let pressAt = null;
   function onStagePointer(event) {
     if (!state.ready || !camera || !raycaster) return;
+    if (state.fps.active) return;            // 1인칭 걷기 중에는 클릭 이동을 쓰지 않습니다
     const target = event.target;
     if (!target || target.tagName !== 'CANVAS') return;
     if (event.type === 'pointerdown') { pressAt = { x: event.clientX, y: event.clientY, t: performance.now() }; return; }
@@ -600,6 +709,7 @@
       </div>
       <div class="mp-tools">
         <button class="mp-btn" id="mp-find">내 위치</button>
+        <button class="mp-btn" id="mp-walk">1인칭</button>
         <button class="mp-btn" id="mp-zones">구역</button>
         <button class="mp-btn" id="mp-profile">프로필</button>
         <button class="mp-btn" id="mp-out">나가기</button>
@@ -631,9 +741,44 @@
       });
     });
     $hud.querySelector('#mp-find').addEventListener('click', () => {
+      if (state.fps.active) exitFirstPerson();
       if (window.cityStudio && window.cityStudio.flyTo) window.cityStudio.flyTo(state.me.x, state.me.z, 2.4, 0.7, window.cityStudio.getState().yaw);
     });
     $hud.querySelector('#mp-profile').addEventListener('click', () => openPanel('profile'));
+    $hud.querySelector('#mp-walk').addEventListener('click', event => {
+      event.stopPropagation();
+      if (state.fps.active) exitFirstPerson();
+      else startFirstPerson();
+    });
+
+    // ── 1인칭 입력 ─────────────────────────────────────────────────────────
+    const FPS_MOVE = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+    const inField = node => !!node && /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName || '');
+    document.addEventListener('keydown', event => {
+      if (!state.fps.active) return;
+      if (event.key === 'Escape') { exitFirstPerson(); return; }
+      if (inField(event.target)) return;
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') { state.fps.shift = true; return; }
+      if (!FPS_MOVE.has(event.code)) return;
+      event.preventDefault();
+      state.fps.keys.add(event.code);
+    });
+    document.addEventListener('keyup', event => {
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') state.fps.shift = false;
+      state.fps.keys.delete(event.code);
+    });
+    window.addEventListener('blur', () => { state.fps.keys.clear(); state.fps.shift = false; });
+    document.addEventListener('mousemove', event => {
+      if (!state.fps.active || inField(event.target)) return;
+      // 화면 오른쪽 = yaw 감소(three.js 카메라 기준). 마우스를 내리면 아래를 봅니다.
+      state.fps.yaw = wrapAngle(state.fps.yaw - (event.movementX || 0) * LOOK_SPEED);
+      state.fps.pitch = clamp(state.fps.pitch - (event.movementY || 0) * LOOK_SPEED * 0.85, -PITCH_LIMIT, PITCH_LIMIT);
+    });
+    document.addEventListener('pointerlockchange', () => {
+      if (!state.fps.active) return;
+      const stage = window.cityStudio && window.cityStudio.stageElement ? window.cityStudio.stageElement() : null;
+      if (!stage || document.pointerLockElement !== stage) exitFirstPerson();   // Esc 로 락 해제 = 걷기 종료
+    });
     $hud.querySelector('#mp-out').addEventListener('click', logout);
     $hud.querySelector('#mp-zone').addEventListener('click', openZones);
     $hud.querySelector('#mp-zones').addEventListener('click', openZones);
@@ -831,9 +976,11 @@
     const count = document.getElementById('mp-count');
     const nick = document.getElementById('mp-nick');
     const zone = document.getElementById('mp-zone');
+    const walk = document.getElementById('mp-walk');
     if (count) count.textContent = `${state.online}명 접속 · 근처 ${state.remotes.size}명`;
     if (zone) zone.textContent = state.zone ? `${state.zone.name} ${state.zone.count}/${state.zone.capacity || 130}` : '구역 —';
     if (nick) nick.textContent = state.user ? `${ROLE_LABEL[state.user.prof] || ''} ${state.user.nickname}` : '—';
+    if (walk) { walk.textContent = state.fps.active ? '1인칭 끄기' : '1인칭'; walk.classList.toggle('on', state.fps.active); }
   }
 
   function log(html, system) {
