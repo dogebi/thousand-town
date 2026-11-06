@@ -73,7 +73,7 @@
     // batch names stay, because those are colour-family and batch identities that other
     // kinds borrow and tests read by string. The name keeps V2's 未来 so the campus
     // reads as the same school grown up, not as a new building on the lot.
-    { facility: 'mall', label: '商场', name: '星河商场', lot: 14, w: 44, d: 48, floors: 4, gate: 'z-' },
+    { facility: 'mall', label: '商场', name: '大连商场', lot: 14, w: 44, d: 48, floors: 4, gate: 'z-' },
     { facility: 'hospital', label: '医院', name: '城市医院', lot: 7, w: 44, d: 48, floors: 6, gate: 'z-' },
     { facility: 'secondary', label: '中学部', name: '未来中学', lot: 17, w: 44, d: 48, floors: 3, gate: 'x-' },
     /* W1.5b (§4.4): the new programmes, two rows' worth of them. Row 0 is the north
@@ -1508,7 +1508,7 @@
           var z=side?-22.06:-24.06;
           [-1,1].forEach(function(sign){shell(sign*11.3,3.45,z,.4,6.1,.75);shell(0,3.45+sign*2.9,z,22.6,.3,.75);});
         });
-        label(record, '星河商场', '#714a3d', '#ebd1a2');
+        label(record, '大连商场', '#714a3d', '#ebd1a2');
       } else if (kind === 'hospital') {
         for (var hospitalLevel = 0; hospitalLevel < building.floors; hospitalLevel++) {
           windowRows(record, hospitalLevel, white, trim, true);
