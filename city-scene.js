@@ -112,7 +112,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
   function facadeScreenFrame(mode,time){
     const phase=Number.isFinite(time)?((time%12)+12)%12:0;
     const frame=mode>=3?mode:mode===2?2:phase<6?0:1;
-    return {phase,frame,scene:['🐬 大连 · 海洋之城','一键三连','大连英博','我爱DALIAN','大连英博'][frame]};
+    return {phase,frame,scene:['🐬 大连 · 海洋之城','我爱大连','大连英博','我爱DALIAN','大连英博'][frame]};
   }
   let facadeMasks=null;
   function glyphMask(glyphs){
@@ -125,7 +125,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
     if(facadeMasks)return facadeMasks;
     facadeMasks=[
       bakedMask(facadeBaked.dolphins),   // 0: 돌고래 3마리(대련 해양 랜드마크)
-      glyphMask(['一','键','三','连']),   // 1
+      glyphMask(['我','爱','大','连']),   // 1
       glyphMask(['大','连','英','博']),   // 2
       bakedMask(facadeBaked.loveDalian),  // 3: 我爱DALIAN
       glyphMask(['大','连','英','博'])    // 4
@@ -134,7 +134,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
   }
   function facadeScreenPlan(city){
     const frames=facadeContentFrames();
-    return [{id:'t-two',mode:1,text:'点赞·投币·收藏 / 一键三连'},{id:'t-four',mode:2,text:'大连英博'}].flatMap(spec=>{
+    return [{id:'t-two',mode:1,text:'🐬 大连 · 海洋之城 / 我爱大连'},{id:'t-four',mode:2,text:'大连英博'}].flatMap(spec=>{
       const host=city.buildings.find(b=>b.ledgerId===spec.id);if(!host)return [];
       const cut=host.floors>=15?Math.floor(host.floors*.74):host.floors,bottom=spec.mode===1?21:15;
       const top=1.4+cut*(host.floorHeight||6)-3,pitch=Math.min(Math.min(host.w,host.d)*.76/24,(top-bottom)/105);
