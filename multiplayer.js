@@ -51,6 +51,7 @@
     me: { x: 0, z: 0, h: 0, anim: 'idle', target: null, spawn: null },
     // 1인칭 걷기: want=사용자가 켬, active=실제 조종 중(포인터 락 여부와 무관하게 진입)
     fps: { active: false, want: false, yaw: 0, pitch: 0, keys: new Set(), shift: false },
+    accident: null, accidentCooldown: 0,
     remotes: new Map(), retry: 0, ready: false,
   };
   let $panel, $hud, $log, $chat, $launch, $error, draft = { mode: 'login', prof: 'office', color: COLORS[0] };
@@ -375,6 +376,11 @@
   // 세션 정리(서버 호출 없이 로컬만) — 로그아웃·중복 접속·인증 실패에서 함께 씁니다.
   function signOutLocal() {
     if (state.fps.active || state.fps.want) exitFirstPerson(true);
+    if (state.accident) {
+      if (state.accident.bus && scene) scene.remove(state.accident.bus);
+      state.accident = null;
+      setAccidentCard(null);
+    }
     for (const remote of [...state.remotes.values()]) removeRemote(remote.id);
     if (selfGroup && scene) { scene.remove(selfGroup); disposeGroup(selfGroup); }
     selfGroup = null; selfRing = null;
@@ -560,6 +566,222 @@
     api.setFirstPerson({ x: state.me.x, y: EYE_HEIGHT, z: state.me.z, yaw: state.fps.yaw, pitch: state.fps.pitch });
   }
 
+  // ── 교통사고 → 119 이송 ───────────────────────────────────────────────────
+  // 걷기 중 차도(차량 도로)에 서 있으면 달려오는 차에 치이고, 구급차가 사고 지점으로
+  // 와서 태워 병원 응급실 앞에 내려 줍니다. 서버는 위치만 알면 되므로 클라 연출입니다.
+  const ROAD_HIT = 6.2;        // 차량 진행축 반길이 + 여유(씬 단위 ≈ m)
+  const AMB_SPEED = 24;        // 구급차 주행 속도
+  const ACCIDENT_COOLDOWN = 8000;
+
+  function roadsList() {
+    return window.cityStudio && window.cityStudio.roads ? window.cityStudio.roads() : [];
+  }
+  function onRoad(x, z) {
+    for (const r of roadsList()) {
+      if (Math.abs(x - r.x) <= r.w / 2 + 0.2 && Math.abs(z - r.z) <= r.d / 2 + 0.2) return true;
+    }
+    return false;
+  }
+  let carCache = { t: 0, list: [] };
+  function carsNow() {
+    const fromScene = window.cityStudio && window.cityStudio.cars ? window.cityStudio.cars() : [];
+    if (fromScene.length) return fromScene;   // 정상: 이번 프레임에 그려진 차량
+    // 씬이 아직 차량을 그리지 못한 환경(저사양·헤드리스)에서는 0.5초 간격으로 샘플합니다.
+    const now = performance.now();
+    if (now - carCache.t > 500) {
+      carCache.t = now;
+      try {
+        const activity = window.cityStudio.getActivity ? window.cityStudio.getActivity() : null;
+        carCache.list = ((activity && activity.vehicles) || [])
+          .filter(v => v.active !== false)
+          .map(v => ({ x: v.x, z: v.z, h: v.heading, kind: v.kind }));
+      } catch { carCache.list = []; }
+    }
+    return carCache.list;
+  }
+  // 병원 응급실 앞 좌표(병원 게이트는 -z 쪽).
+  function hospitalGate() {
+    const h = window.cityStudio.hospital ? window.cityStudio.hospital() : null;
+    if (!h) return { x: state.me.x + 60, z: state.me.z + 60 };
+    return { x: h.x, z: h.z - (h.d || 48) / 2 - 8 };
+  }
+  // 차도만 따라가는 단순 격자 경로(수직 도로 → 수평 도로 → 목적지).
+  function roadRoute(from, to) {
+    const roads = roadsList();
+    const alongX = roads.filter(r => r.axis === 'x');   // x 로 뻗은 길: z 고정
+    const alongZ = roads.filter(r => r.axis === 'z');   // z 로 뻗은 길: x 고정
+    const pts = [{ x: from.x, z: from.z }];
+    const nearest = (list, value, key) => list.reduce((best, r) => (Math.abs(r[key] - value) < Math.abs(best[key] - value) ? r : best), list[0]);
+    if (alongZ.length) {
+      const zRoad = nearest(alongZ, from.x, 'x');
+      pts.push({ x: zRoad.x, z: from.z });
+      if (alongX.length) {
+        const xRoad = nearest(alongX, to.z, 'z');
+        pts.push({ x: zRoad.x, z: xRoad.z });
+        pts.push({ x: to.x, z: xRoad.z });
+      } else {
+        pts.push({ x: zRoad.x, z: to.z });
+      }
+    }
+    pts.push({ x: to.x, z: to.z });
+    return pts.filter((p, i, arr) => i === 0 || Math.hypot(p.x - arr[i - 1].x, p.z - arr[i - 1].z) > 1);
+  }
+
+  function buildAmbulance() {
+    if (typeof THREE === 'undefined') return null;
+    const group = new THREE.Group();
+    const white = new THREE.MeshStandardMaterial({ color: '#f4f2ec', roughness: .6, metalness: .04 });
+    const red = new THREE.MeshStandardMaterial({ color: '#c8402f', roughness: .55 });
+    const glass = new THREE.MeshStandardMaterial({ color: '#24333b', roughness: .3, metalness: .25 });
+    const dark = new THREE.MeshStandardMaterial({ color: '#22282c', roughness: .85 });
+    const add = (w, h, d, mat, x, y, z) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      mesh.position.set(x, y, z); group.add(mesh); return mesh;
+    };
+    add(3.0, 2.2, 8.2, white, 0, 1.9, 0);           // 본체
+    add(3.06, 0.5, 8.24, red, 0, 1.12, 0);          // 하단 적색 띠
+    add(2.86, 1.05, 1.9, glass, 0, 2.75, 2.7);      // 앞유리
+    add(2.86, 0.9, 1.5, glass, 0, 2.7, -2.7);       // 뒷창
+    add(0.52, 1.25, 0.08, red, 0, 2.0, 4.14);       // 적십자(세로)
+    add(1.25, 0.44, 0.08, red, 0, 2.0, 4.14);       // 적십자(가로)
+    for (const [x, z] of [[-1.55, 2.6], [1.55, 2.6], [-1.55, -2.6], [1.55, -2.6]]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.5, 14), dark);
+      wheel.rotation.z = Math.PI / 2; wheel.position.set(x, 0.72, z); group.add(wheel);
+    }
+    const beacon = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.32, 0.62), new THREE.MeshBasicMaterial({ color: '#ff3b30' }));
+    beacon.position.set(0, 3.35, 0.3); group.add(beacon);
+    group.userData.beacon = beacon;
+    return group;
+  }
+
+  function startAccident() {
+    if (state.accident || !state.user || !state.fps.active) return false;
+    const gate = hospitalGate();
+    const bus = buildAmbulance();
+    if (bus && scene) { bus.position.set(gate.x, 0.2, gate.z); scene.add(bus); }
+    state.accident = {
+      phase: 'wait', t: 0, bus, gate,
+      pos: { x: gate.x, z: gate.z },
+      heading: 0,
+      path: roadRoute(gate, { x: state.me.x, z: state.me.z }),
+      seg: 0,
+    };
+    state.fps.keys.clear();
+    state.me.target = null;
+    state.me.anim = 'idle';
+    setAccidentCard('🚑 交通事故', '119 신고 접수 — 구급차가 오고 있습니다');
+    log('차도에서 차에 치였습니다 — 119 구급차 호출', true);
+    setStatus('사고 · 이송 중', false);
+    return true;
+  }
+
+  // 경로를 따라 진행. 다 왔으면 true.
+  function driveAmbulance(a, dt) {
+    let budget = AMB_SPEED * dt;
+    while (budget > 0 && a.seg < a.path.length - 1) {
+      const next = a.path[a.seg + 1];
+      const dx = next.x - a.pos.x, dz = next.z - a.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.0001) { a.seg += 1; continue; }
+      const step = Math.min(dist, budget);
+      a.pos.x += (dx / dist) * step;
+      a.pos.z += (dz / dist) * step;
+      a.heading = Math.atan2(dx, dz);
+      budget -= step;
+      if (dist - step < 0.01) a.seg += 1;
+    }
+    if (a.bus) {
+      a.bus.position.set(a.pos.x, 0.2, a.pos.z);
+      a.bus.rotation.y = a.heading;
+      const beacon = a.bus.userData.beacon;
+      if (beacon) beacon.material.color.setHex(Math.floor(performance.now() / 140) % 2 ? '#ff3b30' : '#2f6bff');
+    }
+    return a.seg >= a.path.length - 1;
+  }
+
+  function chaseCamera(a) {
+    const api = fpsApi();
+    if (!api) return;
+    const dx = Math.sin(a.heading), dz = Math.cos(a.heading);
+    api.setFirstPerson({ x: a.pos.x - dx * 19, y: 12, z: a.pos.z - dz * 19, yaw: a.heading, pitch: -0.3 });
+  }
+
+  function stepAccident(dt) {
+    const a = state.accident;
+    if (!a) return;
+    a.t += dt;
+    if (a.phase === 'wait') {
+      const done = driveAmbulance(a, dt);
+      chaseCamera(a);
+      if (done) { a.phase = 'load'; a.t = 0; setAccidentCard('🚑 이송 준비', '구급대가 접수해 구급차에 태웁니다'); }
+    } else if (a.phase === 'load') {
+      chaseCamera(a);
+      if (a.t > 1.6) {
+        a.phase = 'carry'; a.t = 0; a.seg = 0;
+        a.path = roadRoute(a.pos, a.gate);
+        setAccidentCard('🚑 이송 중', '城市医院 응급실로 이동합니다');
+        log('구급차에 탑승 — 城市医院 로 이송합니다', true);
+      }
+    } else if (a.phase === 'carry') {
+      const done = driveAmbulance(a, dt);
+      state.me.x = a.pos.x; state.me.z = a.pos.z;
+      state.me.h = a.heading + Math.PI;
+      state.me.anim = 'idle';
+      sendPos(false);
+      chaseCamera(a);
+      if (done) { a.phase = 'done'; a.t = 0; setAccidentCard('🏥 城市医院', '응급실 도착 — 치료했습니다'); }
+    } else if (a.phase === 'done') {
+      chaseCamera(a);
+      if (a.t > 1.2) finishAccident();
+    }
+  }
+
+  function finishAccident() {
+    const a = state.accident;
+    state.accident = null;
+    state.accidentCooldown = performance.now() + ACCIDENT_COOLDOWN;
+    if (a && a.bus) {
+      if (scene) scene.remove(a.bus);
+      disposeGroup(a.bus);
+    }
+    if (a) { state.me.x = a.gate.x; state.me.z = a.gate.z; }
+    state.me.h = Math.PI; state.me.anim = 'idle';
+    sendPos(true);
+    setAccidentCard(null);
+    setStatus(`${state.user ? state.user.nickname + ' · ' : ''}${state.connected ? '접속됨' : '연결 중'}`, state.connected);
+    log('치료를 마치고 병원 앞에 섰습니다', true);
+    syncFirstPersonCamera();
+  }
+
+  function setAccidentCard(title, detail) {
+    const card = document.getElementById('mp-accident');
+    if (!card) return;
+    if (!title) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    const t = card.querySelector('b'), d = card.querySelector('span');
+    if (t) t.textContent = title;
+    if (d) d.textContent = detail || '';
+  }
+
+  // 차량 몸체(약 8×3.2) 안에 내가 들어갔는지. 도로 사각형 데이터는 링로드 일부를
+  // 담고 있지 않아서, "차가 실제로 달리는 자리"를 차량 기준으로 직접 판정합니다.
+  function carHit() {
+    for (const car of carsNow()) {
+      const dx = state.me.x - car.x, dz = state.me.z - car.z;
+      const h = car.h || 0, sin = Math.sin(h), cos = Math.cos(h);
+      const along = dx * sin + dz * cos;     // 차의 진행축
+      const side = dx * cos - dz * sin;      // 차의 좌우축
+      if (Math.abs(along) <= ROAD_HIT && Math.abs(side) <= 2.5) return car;
+    }
+    return null;
+  }
+
+  // 걷는 중 차량과 부딪혔는지 확인
+  function checkTraffic() {
+    if (state.accident || performance.now() < (state.accidentCooldown || 0)) return;
+    if (carHit()) startAccident();
+  }
+
   // ── 매 프레임 ─────────────────────────────────────────────────────────────
   function frame(now) {
     requestAnimationFrame(frame);
@@ -583,8 +805,11 @@
     if (!selfGroup) return;
 
     let moving = false;
-    if (state.fps.active) {
+    if (state.accident) {
+      stepAccident(dt);
+    } else if (state.fps.active) {
       moving = stepFirstPerson(dt);
+      checkTraffic();
     } else {
       const goal = state.me.target;
       if (goal) {
@@ -611,7 +836,8 @@
     }
     selfGroup.position.set(state.me.x, 0, state.me.z);
     selfGroup.rotation.y = state.me.h;
-    if (state.fps.active) syncFirstPersonCamera();
+    if (state.accident) { /* 이송 연출이 카메라를 잡고 있습니다 */ }
+    else if (state.fps.active) syncFirstPersonCamera();
     else animateAvatar(selfGroup, moving, dt);
     if (moving) sendPos(false);
     else if (now - lastSend > 3000) sendPos(true);
@@ -722,6 +948,13 @@
     $panel.id = 'mp-panel';
     $panel.className = 'hidden';
     document.body.appendChild($panel);
+
+    // 교통사고 연출 카드(사고 → 이송 → 병원)
+    const accident = el('div');
+    accident.id = 'mp-accident';
+    accident.className = 'hidden';
+    accident.innerHTML = '<b>🚑 交通事故</b><span></span>';
+    document.body.appendChild(accident);
 
     $launch.querySelector('#mp-open').addEventListener('click', () => {
       if (state.user) { $hud.classList.toggle('hidden'); }
@@ -1023,6 +1256,23 @@
     remotes: () => [...state.remotes.values()].map(r => ({ id: r.id, nickname: r.nickname, x: r.x, z: r.z, prof: r.prof, color: r.color })),
     // QA: 아바타 생성 경로를 직접 확인할 수 있게 열어 둡니다.
     buildAvatar: (prof, uid) => buildAvatar(prof, COLORS[0], 'test', uid || 'qa'),
+    // QA: 교통사고 연출을 바로 확인합니다(씬이 준비되지 않은 헤드리스에서도).
+    accident: () => { state.fps.active = true; window.__fpsWalk = true; return startAccident(); },
+    simAccident: seconds => {
+      let t = 0;
+      while (t < seconds && state.accident) { stepAccident(0.05); t += 0.05; }
+      return { phase: state.accident ? state.accident.phase : 'done', me: { x: +state.me.x.toFixed(1), z: +state.me.z.toFixed(1) } };
+    },
+    roadInfo: () => {
+      let best = null;
+      for (const car of carsNow()) {
+        const d = Math.hypot(car.x - state.me.x, car.z - state.me.z);
+        if (!best || d < best.d) best = { d: +d.toFixed(1), kind: car.kind, x: +car.x.toFixed(1), z: +car.z.toFixed(1) };
+      }
+      return { onRoad: onRoad(state.me.x, state.me.z), roads: roadsList().length, cars: carsNow().length, nearestCar: best };
+    },
+    // QA: 프레임 루프 없이 교통사고 판정 한 번만 실행
+    trafficCheck: () => { state.fps.active = true; checkTraffic(); return !!state.accident; },
     open: () => openPanel('login'),
   };
 

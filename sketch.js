@@ -2649,6 +2649,10 @@
     controlMode:()=>controlMode,
     setControlMode:mode=>{setControlMode(mode);return controlMode;},
     setFirstPerson:pose=>{if(physicalScene)physicalScene.setFirstPerson(pose);},
+    // 교통사고 판정용: 차도 사각형 목록·병원·지금 렌더된 차량 위치(읽기 전용).
+    roads:()=>city.roads||[],
+    hospital:()=>(city.facilities||[]).find(f=>f.facility==='hospital')||null,
+    cars:()=>physicalScene&&physicalScene.cars?physicalScene.cars():[],
     buildingScreenPoint:id=>physicalScene&&physicalScene.projectBuilding(id,sketch.width,sketch.height),
     townState:()=>{const v=refreshTown();return JSON.parse(JSON.stringify({...v,demand:undefined,proxyCounts:CityLife.countPeople(CityLife.sample(life,state.daySeconds,v.demand))}));},
     exportSnapshot:()=>CityPlanSnapshots.serialize(currentSnapshot()),
