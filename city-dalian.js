@@ -35,6 +35,26 @@
     }
   ];
 
+  // P0 랜드마크: 星海湾大桥 · 大连观光塔 · 梭鱼湾足球场(大连英博 홈)
+  // 실제 치수를 마을 스케일(건물 25m, 사람 1.7m)에 맞춰 옮겼습니다.
+  var EXTRAS = [
+    {
+      id: 'xinghai-bridge', name: '星海湾大桥', kind: 'bridge',
+      x: 0, z: 245, span: 280, mainSpan: 100, towerH: 30, deckY: 9,
+      note: '跨海大桥 全长6.8km · 主跨460m · 主塔114.3m (축소 표현)'
+    },
+    {
+      id: 'sightseeing-tower', name: '大连观光塔', kind: 'tower',
+      x: 231, z: -70, bodyH: 190, mastH: 22,
+      note: '塔体190m · 해발360m · 劳动公园 绿山'
+    },
+    {
+      id: 'suoyuwan', name: '梭鱼湾足球场', kind: 'stadium',
+      x: -248, z: -150, w: 96, d: 88, seats: 63000,
+      note: '6.3万석 · 2023 개장 · 大连英博 홈'
+    }
+  ];
+
   // 전차 노선: 201/202 는 兴工街 를 공유하고, 101 은 무궤전차(가선 2줄).
   var LINES = [
     {
@@ -56,6 +76,7 @@
 
   function squares() { return SQUARES.map(function (s) { return Object.assign({}, s); }); }
   function lines() { return LINES.map(function (l) { return Object.assign({}, l, { stops: l.stops.slice() }); }); }
+  function extras() { return EXTRAS.map(function (e) { return Object.assign({}, e); }); }
 
   // 노선 위 정류장 위치(0..1). 양 끝은 종점이라 살짝 안쪽.
   function stopFractions(line) {
@@ -171,6 +192,14 @@
     var tramDark = mat('tram-dark', '#3b4a50');
     var wireMat = mat('wire', '#4a5155', { metalness: 0.6, roughness: 0.5 });
     var steel = mat('steel', '#9aa0a3', { metalness: 0.7, roughness: 0.35 });
+    var bridgeDeck = mat('bridge-deck', '#cfd3d2');
+    var bridgeTower = mat('bridge-tower', '#e2e5e3');
+    var cableMat = mat('bridge-cable', '#f0f2f0', { metalness: 0.5, roughness: 0.4 });
+    var towerConcrete = mat('tower-concrete', '#dedbd0');
+    var pitchMat = mat('pitch', '#5f8f4e');
+    var seatBlue = mat('seat-blue', '#2a4f79');
+    var seatPale = mat('seat-pale', '#cdd6db');
+    var roofMat = mat('stadium-roof', '#e8ecee', { metalness: 0.25, roughness: 0.6 });
 
     // 星海广场 ─────────────────────────────────────────────────────────
     function buildXinghai(site) {
@@ -268,6 +297,110 @@
       if (site.kind === 'waterfront') buildXinghai(site);
       else if (site.id === 'zhongshan') buildZhongshan(site);
       else buildYouhao(site);
+    });
+
+    // ── P0 랜드마크 ─────────────────────────────────────────────────────
+    function strut(a, b, radius, material) {
+      var dir = new T.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      var len = dir.length();
+      if (len < 0.01) return null;
+      var mesh = new T.Mesh(new T.CylinderGeometry(radius, radius, len, 6), material);
+      mesh.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+      mesh.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), dir.clone().normalize());
+      group.add(mesh);
+      return mesh;
+    }
+    function ringMesh(inner, outer, material, y, cx, cz, segments) {
+      var mesh = new T.Mesh(new T.RingGeometry(inner, outer, segments || 48), material);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(cx, y, cz);
+      mesh.receiveShadow = true;
+      group.add(mesh);
+      return mesh;
+    }
+
+    // 星海湾大桥 — 케이블 사장교(주탑 2기 + 케이블 + 교각)
+    function buildBridge(site) {
+      var x0 = site.x, z0 = site.z, deckY = site.deckY;
+      box(site.span, 1.4, 15, bridgeDeck, x0, deckY, z0);
+      [-7.2, 7.2].forEach(function (off) {
+        box(site.span, 0.95, 0.4, steel, x0, deckY + 1.15, z0 + off);
+      });
+      for (var px = -site.span / 2 + 24; px <= site.span / 2 - 24; px += 28) {
+        if (Math.abs(px) < site.mainSpan / 2 + 6) continue;
+        cyl(1.5, 2.0, deckY, 10, granite, x0 + px, deckY / 2, z0);
+      }
+      [-site.mainSpan / 2, site.mainSpan / 2].forEach(function (tx) {
+        [-6.2, 6.2].forEach(function (tz) {
+          box(2.6, site.towerH, 2.2, bridgeTower, x0 + tx, site.towerH / 2, z0 + tz);
+        });
+        box(2.4, 1.7, 17, bridgeTower, x0 + tx, site.towerH * 0.60, z0);
+        box(2.4, 1.7, 17, bridgeTower, x0 + tx, site.towerH * 0.90, z0);
+        for (var c = 1; c <= 8; c++) {
+          var dx = c * (site.mainSpan * 0.5) / 9;
+          [-1, 1].forEach(function (sgn) {
+            [-1, 1].forEach(function (side) {
+              strut([x0 + tx, site.towerH - 1.4, z0 + side * 6.2],
+                [x0 + tx + sgn * dx, deckY + 1.0, z0 + side * 7.0], 0.09, cableMat);
+            });
+          });
+        }
+      });
+      sign('星海湾大桥', x0, deckY + 6.4, z0 + 9, 18, 4.2, 0, '#f6f1e4', '#35505c');
+    }
+
+    // 大连观光塔 — 기단 + 샤프트 + 전망대 + 안테나 (탑체 190m)
+    function buildTower(site) {
+      var h = site.bodyH, deckY = h * 0.79;
+      cyl(13, 15, 7, 24, granite, site.x, 3.5, site.z);                 // 기단
+      cyl(7.4, 9.0, 10, 22, towerConcrete, site.x, 12, site.z);         // 하부
+      cyl(4.4, 7.4, deckY - 17, 20, towerConcrete, site.x, 17 + (deckY - 17) / 2, site.z);
+      cyl(10.5, 8.0, 4.4, 28, glass, site.x, deckY + 2.2, site.z);      // 전망대
+      cyl(10.9, 10.9, 1.0, 28, steel, site.x, deckY + 5.0, site.z);
+      cyl(3.0, 4.4, 5.2, 16, towerConcrete, site.x, deckY + 7.6, site.z);
+      cyl(2.4, 3.0, h - deckY - 10, 16, towerConcrete, site.x, deckY + 10 + (h - deckY - 10) / 2, site.z);
+      cyl(1.2, 2.4, 6, 12, towerConcrete, site.x, h - 2.5, site.z);
+      cyl(0.55, 1.2, site.mastH, 8, steel, site.x, h + site.mastH / 2, site.z);
+      sign('大连观光塔', site.x, 9.5, site.z + 16, 16, 3.8, 0, '#f6f1e4', '#35505c');
+    }
+
+    // 梭鱼湾足球场 — 3단 관중석 링 + 지붕 링 + 조명 4기 + 잔디
+    function buildStadium(site) {
+      var cx = site.x, cz = site.z;
+      box(site.w * 0.52, 0.5, site.d * 0.5, pitchMat, cx, 0.55, cz);
+      box(site.w * 0.46, 0.06, 0.4, marble, cx, 0.82, cz);                    // 하프라인
+      [-1, 1].forEach(function (s) {
+        box(0.4, 0.06, site.d * 0.34, marble, cx + s * site.w * 0.17, 0.82, cz);
+      });
+      box(site.w * 0.30, 1.0, site.d * 0.22, marble, cx, 0.7, cz);            // 골 에어리어
+      var tiers = [
+        [34, 40, 3.0, seatBlue], [40, 46, 6.4, seatPale], [46, 53, 9.8, seatBlue]
+      ];
+      tiers.forEach(function (t) { ringMesh(t[0], t[1], t[3], t[2], cx, cz, 56); });
+      // 외벽 + 수직 리브
+      var wall = new T.Mesh(new T.CylinderGeometry(54, 55, 15, 56, 1, true), roofMat);
+      wall.position.set(cx, 7.5, cz); group.add(wall);
+      for (var i = 0; i < 28; i++) {
+        var a = (i / 28) * Math.PI * 2;
+        box(0.9, 15, 0.9, roofMat, cx + Math.cos(a) * 54.4, 7.5, cz + Math.sin(a) * 54.4);
+      }
+      // 지붕 링(관중석 위)
+      ringMesh(30, 54, roofMat, 16.4, cx, cz, 56);
+      // 조명 4기
+      for (var k = 0; k < 4; k++) {
+        var ang = Math.PI / 4 + (k / 4) * Math.PI * 2;
+        var lx = cx + Math.cos(ang) * 60, lz = cz + Math.sin(ang) * 60;
+        cyl(0.7, 1.0, 30, 8, steel, lx, 15, lz);
+        box(5.2, 2.4, 1.4, mat('floodlight', '#e9edef', { emissive: '#fff3d0', emissiveIntensity: 0.35 }), lx, 30.4, lz, -ang);
+      }
+      sign('梭鱼湾足球场', cx, 20, cz + 57, 26, 5.4, 0, '#f6f1e4', '#274a6e');
+      sign('大连英博', cx, 13.4, cz + 57, 15, 3.4, 0, '#ffe9b8', '#274a6e');
+    }
+
+    EXTRAS.forEach(function (site) {
+      if (site.kind === 'bridge') buildBridge(site);
+      else if (site.kind === 'tower') buildTower(site);
+      else buildStadium(site);
     });
 
     // ── 전차 ────────────────────────────────────────────────────────────
@@ -394,6 +527,7 @@
           };
         }),
         ringBlocks: ringBlocks.slice(),
+        extras: EXTRAS.map(function (e) { return { id: e.id, name: e.name, kind: e.kind, x: e.x, z: e.z, note: e.note }; }),
         count: SQUARES.length,
         vans: vehicles.length
       };
@@ -451,6 +585,33 @@
     api.ctx.fillStyle = 'rgba(191,230,242,.85)';
     api.ctx.arc(c[0], c[1], Math.max(1.4, api.view.scale * 2.6), 0, Math.PI * 2);
     api.ctx.fill();
+    // P0 랜드마크 표시(2D 폴백)
+    EXTRAS.forEach(function (e) {
+      if (e.kind === 'bridge') {
+        line([[e.x - e.span / 2, e.z, 0.5], [e.x + e.span / 2, e.z, 0.5]], 'rgba(226,229,227,.95)', 1.6);
+        [-1, 1].forEach(function (s2) {
+          cuboid(e.x + s2 * e.mainSpan / 2, e.z, 3, 16, 0.5, 30, '#e2e5e3');
+        });
+      } else if (e.kind === 'tower') {
+        cuboid(e.x, e.z, 20, 20, 0.4, 6, '#dedbd0');
+        var tp = point(e.x, e.z, e.bodyH * 0.55);
+        api.ctx.beginPath();
+        api.ctx.strokeStyle = '#dedbd0'; api.ctx.lineWidth = Math.max(2, api.view.scale * 1.6);
+        api.ctx.moveTo(tp[0], tp[1]);
+        var tp2 = point(e.x, e.z, 0.5);
+        api.ctx.lineTo(tp2[0], tp2[1]); api.ctx.stroke();
+        api.ctx.beginPath(); api.ctx.fillStyle = '#e8ecee';
+        api.ctx.arc(tp[0], tp[1], Math.max(3, api.view.scale * 3.2), 0, Math.PI * 2); api.ctx.fill();
+      } else {
+        var pts = [];
+        for (var i2 = 0; i2 < 24; i2++) {
+          var a2 = (i2 / 24) * Math.PI * 2;
+          pts.push([e.x + Math.cos(a2) * e.w / 2, e.z + Math.sin(a2) * e.d / 2, 0.6]);
+        }
+        polygon(pts, '#dfe4e6');
+        plane(e.x, e.z, e.w * 0.5, e.d * 0.48, 0.7, '#5f8f4e');
+      }
+    });
     // 전차
     var t = Number.isFinite(time) ? time : 0;
     LINES.forEach(function (l) {
@@ -476,8 +637,24 @@
     });
   }
 
+  function bounds() {
+    var out = [];
+    SQUARES.forEach(function (s) {
+      var half = (s.radius || Math.max(s.w, s.d) / 2) + 18;
+      out.push({ x: s.x, z: s.z, half: half, y: 26 });
+    });
+    EXTRAS.forEach(function (e) {
+      var half = e.kind === 'bridge' ? e.span / 2 : (e.kind === 'stadium' ? 62 : 28);
+      var y = e.kind === 'tower' ? e.bodyH + e.mastH : (e.kind === 'bridge' ? e.towerH : 32);
+      out.push({ x: e.x, z: e.z, half: half, y: y });
+    });
+    return out;
+  }
+
   return {
     squares: squares,
+    extras: extras,
+    bounds: bounds,
     lines: lines,
     stopFractions: stopFractions,
     positionAt: positionAt,

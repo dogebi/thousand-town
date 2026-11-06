@@ -1146,7 +1146,7 @@ for(const[name,api]of[['waterfront',root.CityWaterfront],['transit',root.CityTra
 if(api){const controller=api.create(T,kit,city);scene.add(controller.group);publicScenes.push({name,controller});}
 }
 // 大连 랜드마크는 도시 기본 블록 밖(동쪽 띠)에 있어서 카메라/그림자 범위에 직접 넣어 줍니다.
-if(root.CityDalian&&root.CityDalian.squares){for(const square of root.CityDalian.squares()){const half=(square.radius||Math.max(square.w,square.d)/2)+18;for(const sx of[-1,1])for(const sz of[-1,1])bounds.push(new T.Vector3(square.x+sx*half,26,square.z+sz*half));}}
+if(root.CityDalian&&root.CityDalian.bounds){for(const b of root.CityDalian.bounds()){for(const sx of[-1,1])for(const sz of[-1,1])bounds.push(new T.Vector3(b.x+sx*b.half,b.y,b.z+sz*b.half));}}
 if(root.CityDistrict&&CityDistrict.getStatus().ready){
 prototypeBuilding=city.buildings.filter(b=>b.kind==='glass').sort((a,b)=>b.z-a.z||a.x-b.x)[0]||city.buildings[0]||null;
 if(prototypeBuilding){district=CityDistrict.create(T,city,settings);scene.add(district.group);facadeMaterials=district.getGlassMaterials();}
