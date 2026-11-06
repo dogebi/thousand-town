@@ -93,12 +93,12 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
   function facadeScreenFrame(mode,time){
     const phase=Number.isFinite(time)?((time%12)+12)%12:0;
     const frame=mode===2?2:phase<6?0:1;
-    return {phase,frame,scene:['点赞·投币·收藏','一键三连','仪绘士BY'][frame]};
+    return {phase,frame,scene:['点赞·投币·收藏','一键三连','大连英博'][frame]};
   }
   let facadeMasks=null;
   function facadeContentFrames(){
     if(facadeMasks)return facadeMasks;
-    facadeMasks=[['like','coin','star'],['一','键','三','连'],['仪','绘','士','BY'],['我','heart','AI'],['大','连','英','博']].map(glyphs=>{
+    facadeMasks=[['like','coin','star'],['一','键','三','连'],['大','连','英','博'],['我','heart','AI'],['大','连','英','博']].map(glyphs=>{
       const mask=new Uint8Array(24*105);
       glyphs.forEach((glyph,line)=>{for(let y=0;y<24;y++){const bits=parseInt(facadeGlyphs[glyph].slice(y*6,y*6+6),16);
         for(let x=0;x<24;x++)if(bits&(1<<(23-x)))mask[((glyphs.length===3?13:0)+line*27+y)*24+x]=255;
@@ -107,7 +107,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
   }
   function facadeScreenPlan(city){
     const frames=facadeContentFrames();
-    return [{id:'t-two',mode:1,text:'点赞·投币·收藏 / 一键三连'},{id:'t-four',mode:2,text:'仪绘士BY'}].flatMap(spec=>{
+    return [{id:'t-two',mode:1,text:'点赞·投币·收藏 / 一键三连'},{id:'t-four',mode:2,text:'大连英博'}].flatMap(spec=>{
       const host=city.buildings.find(b=>b.ledgerId===spec.id);if(!host)return [];
       const cut=host.floors>=15?Math.floor(host.floors*.74):host.floors,bottom=spec.mode===1?21:15;
       const top=1.4+cut*(host.floorHeight||6)-3,pitch=Math.min(Math.min(host.w,host.d)*.76/24,(top-bottom)/105);
@@ -123,7 +123,7 @@ for(const e of external){if(e.light.intensity<=0||e.level<=0)continue;
       {id:'t-one',mode:3,text:'我❤️AI',tint:'#62b6f0'},
       {id:'t-two',mode:1,text:'点赞·投币·收藏 / 一键三连',tint:'#efb65e'},
       {id:'t-three',mode:4,text:'大连英博',tint:'#56b1dc'},
-      {id:'t-four',mode:2,text:'仪绘士BY',tint:'#e9aa57'}
+      {id:'t-four',mode:2,text:'大连英博',tint:'#e9aa57'}
     ].flatMap(spec=>{
       const host=city.buildings.find(b=>b.ledgerId===spec.id);if(!host)return [];
       const step=host.floorHeight||6,cut=host.floors>=15?Math.floor(host.floors*.74):host.floors,surfaces=[];
