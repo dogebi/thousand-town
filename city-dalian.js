@@ -61,7 +61,7 @@
     {
       id: 'suoyuwan', name: '梭鱼湾足球场', kind: 'stadium',
       x: -248, z: -150, w: 110, d: 96, seats: 63000,
-      note: '6.3万석 · 2단 관람석 · PTFE 파도 지붕 · BDP 설계 · 2023.04.29 개장 · 大连英博 홈'
+      note: '6.3万석 · 26.5ha · 13.6만㎡ · ETFE 4만㎡/9색 7823판 · 2.2km 慢跑坡道 · 三面环海 · 2023.04.29 개장 · 大连英博 홈'
     }
   ];
 
@@ -206,9 +206,9 @@
     var bridgeTower = mat('bridge-tower', '#e2e5e3');
     var cableMat = mat('bridge-cable', '#f0f2f0', { metalness: 0.5, roughness: 0.4 });
     var towerConcrete = mat('tower-concrete', '#dedbd0');
-    var seatBlue = mat('seat-blue', '#2a4f79', { side: T.DoubleSide });
-    var seatMid = mat('seat-mid', '#39719e', { side: T.DoubleSide });
-    var seatPale = mat('seat-pale', '#c4d2da', { side: T.DoubleSide });
+    // 관중석 — 회색·파랑 6색을 저역→고역으로渐变退晕 (위챗 백과 '看台座椅设计')
+    var seatRamp = ['#123a5c', '#1c5a86', '#2f7fa8', '#5d97b4', '#9db6c2', '#cfd6d8']
+      .map(function (hex, i) { return mat('seat-' + i, hex, { side: T.DoubleSide }); });
 
     // 星海广场 ─────────────────────────────────────────────────────────
     function buildXinghai(site) {
@@ -396,7 +396,7 @@
       return [dz / L, -dx / L];
     }
     function topWave(th) {
-      return 3.2 * Math.sin(th * 3 + 0.8) + 1.4 * Math.sin(th * 6 + 2.4) + 0.8 * Math.cos(th * 2 - 0.5);
+      return 2.0 * Math.sin(th * 3 + 0.8) + 0.9 * Math.sin(th * 6 + 2.4) + 0.5 * Math.cos(th * 2 - 0.5);
     }
     function facadeTop(th) { return FA_TOP + topWave(th) * STAD; }
     function facadeScale(v) {
@@ -526,59 +526,56 @@
       });
     }
 
-    // ETFE 파사드 — 세로로 흐르는 블루 패널 + 쿠션 이음선 + 흰 나선 램프 띠
+    // ETFE 파사드 — 9색 블루 패싯(삼각 쿠션) 7823판. 위챗 백과 사진의 각진 결정면.
     function facadeCanvas() {
       return canvasTex(1024, 512, function (g, W, H) {
-        var cols = 88, cw = W / cols;
-        var pal = ['#05131f', '#071d30', '#0a2b44', '#0c3a5c', '#0f5078', '#156489',
-          '#2680a9', '#3d9dc0', '#63b6d2'];
-        for (var c = 0; c < cols; c++) {
-          var u = (c + 0.5) / cols;
-          var tone = 0.5
-            + 0.30 * Math.sin(u * Math.PI * 4 + 0.7)
-            + 0.18 * Math.sin(u * Math.PI * 9 - 1.1)
-            + 0.10 * Math.sin(u * Math.PI * 17 + 2.2);
-          var base = Math.max(0, Math.min(0.999, tone));
-          for (var y = 0; y < H; y += 16) {
-            var v = 1 - (y + 8) / H;                       // 위로 갈수록 밝다
-            var k = Math.min(pal.length - 1, Math.max(0,
-              Math.round(base * (pal.length - 1) + (v - 0.5) * 1.8)));
-            g.fillStyle = pal[k];
-            g.fillRect(c * cw, y, cw + 1, 17);
+        var cols = 48, rows = 14, cw = W / cols, ch = H / rows;
+        var pal = ['#041624', '#06233a', '#08314f', '#0a4168', '#0d5584',
+          '#106ba0', '#1b84bb', '#37a0cf', '#63bada'];
+        function pick(k) { return pal[Math.max(0, Math.min(pal.length - 1, k))]; }
+        for (var r = 0; r < rows; r++) {
+          for (var c = 0; c < cols; c++) {
+            var tone = 0.5
+              + 0.26 * Math.sin(c * 0.62 + r * 0.34)
+              + 0.16 * Math.sin(c * 0.21 - r * 0.52)
+              + 0.09 * Math.sin(c * 1.7 + r * 0.9 + 1.3);
+            var base = tone * (pal.length - 1) + (0.5 - r / rows) * 1.4;
+            var x0 = c * cw, y0 = r * ch;
+            // 한 칸을 두 삼각형으로 쪼개 패싯 결정면을 만든다
+            g.fillStyle = pick(Math.round(base));
+            g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0 + cw, y0); g.lineTo(x0 + cw, y0 + ch); g.closePath(); g.fill();
+            g.fillStyle = pick(Math.round(base + (Math.sin(c * 0.9 + r * 0.7) > 0 ? 1 : -1)));
+            g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0, y0 + ch); g.lineTo(x0 + cw, y0 + ch); g.closePath(); g.fill();
           }
-          // 쿠션 이음선(세로)
-          g.strokeStyle = 'rgba(4,13,22,.55)'; g.lineWidth = 1.4;
-          g.beginPath(); g.moveTo(c * cw, 0); g.lineTo(c * cw, H); g.stroke();
         }
-        // 가로 쿠션 이음선
-        g.strokeStyle = 'rgba(4,13,22,.42)'; g.lineWidth = 1.2;
-        for (var yy = 0; yy <= H; yy += 16) {
-          g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke();
-        }
-        // 흰 나선 램프는 지오메트리 밴드로 따로 올린다(텍스처에 또 그리면 이중으로 보인다).
+        // 쿠션 이음선(세로·가로)
+        g.strokeStyle = 'rgba(4,14,24,.5)'; g.lineWidth = 1.2;
+        for (var xx = 0; xx <= W; xx += cw) { g.beginPath(); g.moveTo(xx, 0); g.lineTo(xx, H); g.stroke(); }
+        for (var yy = 0; yy <= H; yy += ch) { g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke(); }
         // 상단 클레어스토리 + 하단 그림자
-        g.fillStyle = 'rgba(226,238,246,.26)'; g.fillRect(0, 0, W, 22);
-        g.fillStyle = 'rgba(3,9,16,.4)'; g.fillRect(0, H - 20, W, 20);
+        g.fillStyle = 'rgba(226,238,246,.22)'; g.fillRect(0, 0, W, 18);
+        g.fillStyle = 'rgba(3,9,16,.4)'; g.fillRect(0, H - 18, W, 18);
       });
     }
 
-    // PTFE 지붕 — 36개 방사 리브 + 동심 케이블 링
+    // PTFE 지붕 — 다이아몬드 케이블 넷(방사 케이블 + 동심 링)
     function roofCanvas() {
       return canvasTex(512, 512, function (g, W, H) {
         g.fillStyle = '#f2f5f5'; g.fillRect(0, 0, W, H);
-        for (var i = 0; i < 36; i++) {
-          var x = (i / 36) * W;
-          g.strokeStyle = 'rgba(56,72,86,.20)'; g.lineWidth = 2.2;
-          g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 7, H); g.stroke();
+        var step = 46;
+        g.strokeStyle = 'rgba(52,68,82,.22)'; g.lineWidth = 1.8;
+        for (var d = -H; d < W + H; d += step) {
+          g.beginPath(); g.moveTo(d, 0); g.lineTo(d + H, H); g.stroke();
+          g.beginPath(); g.moveTo(d, 0); g.lineTo(d - H, H); g.stroke();
         }
-        for (var r = 1; r < 11; r++) {
-          var y = (r / 11) * H;
-          g.strokeStyle = 'rgba(56,72,86,.13)'; g.lineWidth = 1.6;
+        for (var r = 1; r < 9; r++) {
+          var y = (r / 9) * H;
+          g.strokeStyle = 'rgba(52,68,82,.12)'; g.lineWidth = 1.4;
           g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
         }
         var grd = g.createLinearGradient(0, 0, 0, H);
         grd.addColorStop(0, 'rgba(120,140,152,.10)');
-        grd.addColorStop(0.55, 'rgba(255,255,255,.16)');
+        grd.addColorStop(0.55, 'rgba(255,255,255,.18)');
         grd.addColorStop(1, 'rgba(96,116,132,.14)');
         g.fillStyle = grd; g.fillRect(0, 0, W, H);
       });
@@ -599,8 +596,8 @@
       box(122, 0.5, 300, seaMat, cx, -0.62, cz + 209);          // 남쪽 만
 
       // 대지(마을 지반 밖 서쪽 매립지) — 경기장이 허공에 뜨지 않도록
-      box(122, 0.18, 118, mat('stadium-site', '#c6c8bf'), cx, 0.09, cz);
-      box(112, 0.2, 108, mat('stadium-plaza', '#d6d3c6'), cx, 0.16, cz);
+      box(122, 0.18, 118, mat('stadium-site', '#b9bcb6'), cx, 0.09, cz);
+      box(112, 0.2, 108, mat('stadium-plaza', '#cbcdc6'), cx, 0.16, cz);
 
       // 해안 난간 — 동쪽만 육지와 이어진다
       var quayMat = mat('suoyuwan-quay', '#cfc9b8', { roughness: 0.85 });
@@ -632,28 +629,29 @@
         box(0.78, 0.05, 3.16, goalMat, gx - side * 0.39, 1.30, cz);
       });
 
-      // 관람석 2단 — 단마다 좌석 띠(밝은/어두운 블루)와 라이저
+      // 관람석 2단 — 좌석은 회색·파랑 6색이 저역에서 고역으로漸变退晕
       var riserMat = mat('stadium-riser', '#1c2a38', { side: T.DoubleSide });
-      function tier(rx0, rz0, rows, tread, rise, y0, alt) {
+      function tier(rx0, rz0, rows, tread, rise, y0, t0, t1) {
         for (var r = 0; r < rows; r++) {
           var rIn = rx0 + r * tread, rOut = rIn + tread;
           var yT = y0 + (r + 1) * rise;
           var yF = r === 0 ? y0 - 1.3 * STAD : y0 + r * rise;
           var zIn = rz0 + r * tread, zOut = zIn + tread;
-          // 좌석 띠: 두 블루를 한 줄씩 번갈아, 4줄마다 밝은 회색(빈 좌석)
-          var seatMat = (r % 4 === 3) ? seatPale : (r % 2 === 0 ? seatBlue : seatMid);
-          band(SSEG, function (t) {
-            var a = sup(t, rIn, zIn), b = sup(t, rOut, zOut);
+          var t = t0 + (t1 - t0) * (r / Math.max(1, rows - 1));
+          var seatMat = seatRamp[Math.min(seatRamp.length - 1,
+            Math.max(0, Math.round(t * (seatRamp.length - 1))))];
+          band(SSEG, function (t2) {
+            var a = sup(t2, rIn, zIn), b = sup(t2, rOut, zOut);
             return [a[0], yT, a[1], b[0], yT, b[1]];
           }, seatMat).castShadow = false;
-          band(SSEG, function (t) {
-            var a = sup(t, rIn, zIn);
+          band(SSEG, function (t2) {
+            var a = sup(t2, rIn, zIn);
             return [a[0], yT, a[1], a[0], yF, a[1]];
           }, riserMat).castShadow = false;
         }
       }
-      tier(IN_RX, IN_RZ, L_ROWS, L_TREAD, L_RISE, L_Y0, true);
-      tier(U_IN_RX, U_IN_RZ, U_ROWS, U_TREAD, U_RISE, U_BASE, false);
+      tier(IN_RX, IN_RZ, L_ROWS, L_TREAD, L_RISE, L_Y0, 0, 0.5);
+      tier(U_IN_RX, U_IN_RZ, U_ROWS, U_TREAD, U_RISE, U_BASE, 0.55, 1);
 
       // 첫 열 아래 벽
       band(SSEG, function (t) {
@@ -682,10 +680,12 @@
         return [p[0], U_TOP, p[1], p[0], facadeTop(t) - 0.2, p[1]];
       }, mat('stadium-backwall', '#101820'));
 
-      // ETFE 파사드 — 초타원 밴드, 위 가장자리가 물결
+      // ETFE 파사드 — 초타원 밴드, 위 가장자리가 물결. 야간 泛光(海洋蓝)을 위해 자체 발광.
       var facadeTex = facadeCanvas();
+      if (facadeTex) { facadeTex.wrapS = T.RepeatWrapping; facadeTex.repeat.set(2, 1); }
       var facadeMat = ownMat(new T.MeshStandardMaterial({
         map: facadeTex, color: '#ffffff', roughness: 0.4, metalness: 0.3,
+        emissive: '#0b2740', emissiveMap: facadeTex, emissiveIntensity: 0.12,
         side: T.DoubleSide
       }));
       surface(SFSEG, 20, function (t, v) {
@@ -693,21 +693,27 @@
         return [p[0], p[1], p[2]];
       }, facadeMat);
 
-      // 나선 램프 밴드(2.2km) — 파사드를 한 바퀴 감아 도는 흰 띠 + 처마
-      var rampMat = mat('stadium-ramp', '#f0f2f3', { metalness: 0.18, roughness: 0.5 });
+      // 나선 램프 밴드(2.2km) — 파사드를 감아 도는 흰 띠 두 줄 + 처마
+      var rampMat = mat('stadium-ramp', '#f2f4f5', { metalness: 0.18, roughness: 0.5 });
       var rampLip = mat('stadium-ramp-lip', '#fafbfb', { metalness: 0.2, roughness: 0.42 });
-      function rampLift(t) { return 21 * STAD + 2.6 * STAD * Math.sin(t + 0.6); }
-      band(SFSEG, function (t) {
-        var v = Math.max(0, Math.min(1, (rampLift(t) - FA_BASE) / (facadeTop(t) - FA_BASE)));
-        var s = facadeScale(v) + 1.1 / FA_RX;
-        var p = sup(t, FA_RX * s, FA_RZ * s);
-        return [p[0], rampLift(t) + 1.35 * STAD, p[1], p[0], rampLift(t) - 1.35 * STAD, p[1]];
-      }, rampMat);
-      band(SFSEG, function (t) {
-        var p = sup(t, FA_RX + 1.35, FA_RZ + 1.35);
-        var q = sup(t, FA_RX + 0.3, FA_RZ + 0.3);
-        return [p[0], rampLift(t) - 1.3 * STAD, p[1], q[0], rampLift(t) - 1.3 * STAD, q[1]];
-      }, rampLip).castShadow = false;
+      function rampLift(t, base, amp, phase) { return base * STAD + amp * STAD * Math.sin(t + phase); }
+      function rampBand(base, amp, phase, half) {
+        band(SFSEG, function (t) {
+          var y = rampLift(t, base, amp, phase);
+          var v = Math.max(0, Math.min(1, (y - FA_BASE) / (facadeTop(t) - FA_BASE)));
+          var s = facadeScale(v) + 1.1 / FA_RX;
+          var p = sup(t, FA_RX * s, FA_RZ * s);
+          return [p[0], y + half * STAD, p[1], p[0], y - half * STAD, p[1]];
+        }, rampMat);
+        band(SFSEG, function (t) {
+          var y = rampLift(t, base, amp, phase);
+          var p = sup(t, FA_RX * 1.028 + 1.35, FA_RZ * 1.028 + 1.35);
+          var q = sup(t, FA_RX * 1.028 + 0.3, FA_RZ * 1.028 + 0.3);
+          return [p[0], y - 1.25 * STAD, p[1], q[0], y - 1.25 * STAD, q[1]];
+        }, rampLip).castShadow = false;
+      }
+      rampBand(33, 2.2, 0.6, 1.25);
+      rampBand(24, 2.4, 2.5, 1.0);
 
       // 1층 콜로네이드 — 어두운 유리 띠 + 흰 수직 핀 + 캐노피
       var plinthH = 6.4 * STAD;
@@ -716,8 +722,8 @@
       band(SFSEG, function (t) {
         var p = sup(t, r0x + 0.7, r0z + 0.7);
         return [p[0], FA_BASE + plinthH, p[1], p[0], FA_BASE - 0.5, p[1]];
-      }, mat('stadium-plinth', '#21323f', { metalness: 0.5, roughness: 0.35 }));
-      var finMat = mat('stadium-fin', '#f2f5f6', { metalness: 0.12, roughness: 0.5 });
+      }, mat('stadium-plinth', '#6d737a', { metalness: 0.35, roughness: 0.5 }));
+      var finMat = mat('stadium-fin', '#e9e8e2', { metalness: 0.1, roughness: 0.62 });
       var finGeo = new T.BoxGeometry(0.8, plinthH - 0.25, 0.6);
       var fins = new T.InstancedMesh(finGeo, finMat, 56);
       var dummy = new T.Object3D();
