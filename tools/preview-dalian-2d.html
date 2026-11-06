@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>大连town 2D 폴백 프리뷰</title>
+<style>html,body{margin:0;background:#eef1ea}canvas{display:block}</style>
+<canvas id="c" width="770" height="430"></canvas>
+<script src="../city-dalian.js"></script>
+<script>
+  // sketch.js 의 2D 폴백(point/plane/polygon/cuboid)과 같은 투영으로 그려본다.
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const yaw = 1.05, pitch = 0.66, scale = 2.1;
+  const view = { c: Math.cos(yaw), s: Math.sin(yaw), sp: Math.sin(pitch), cp: Math.cos(pitch), scale };
+  const CX = -248, CZ = -150;
+  const mid = raw(CX, CZ, 0);
+  view.cx = canvas.width * 0.5 - mid[0] * scale;
+  view.cy = canvas.height * 0.55 - mid[1] * scale;
+
+  function raw(x, z, y = 0) {
+    const rx = x * view.c - z * view.s, depth = x * view.s + z * view.c;
+    return [rx, depth * view.sp - y * view.cp, depth];
+  }
+  function point(x, z, y = 0) {
+    const p = raw(x, z, y);
+    return [view.cx + p[0] * view.scale, view.cy + p[1] * view.scale];
+  }
+  function polygon(points, fill, stroke, width = 0.6) {
+    ctx.beginPath();
+    points.forEach((p, i) => { const q = point(p[0], p[1], p[2] === undefined ? 0 : p[2]); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.stroke(); }
+  }
+  function line(points, color, width = 1) {
+    ctx.beginPath();
+    points.forEach((p, i) => { const q = point(p[0], p[1], p[2] === undefined ? 0 : p[2]); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
+  }
+  function plane(x, z, w, d, y, color, stroke) {
+    polygon([[x - w / 2, z - d / 2, y], [x + w / 2, z - d / 2, y], [x + w / 2, z + d / 2, y], [x - w / 2, z + d / 2, y]], color, stroke);
+  }
+  function cuboid(x, z, w, d, y, h, color, rotation = 0) {
+    if (h <= 0) return;
+    const c = Math.cos(rotation), s = Math.sin(rotation);
+    const corners = [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]]
+      .map(p => [x + p[0] * c - p[1] * s, z + p[0] * s + p[1] * c]);
+    polygon(corners.map(p => [p[0], p[1], y]), color);
+    polygon(corners.map(p => [p[0], p[1], y + h]), color);
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i], b = corners[(i + 1) % 4];
+      polygon([[a[0], a[1], y], [b[0], b[1], y], [b[0], b[1], y + h], [a[0], a[1], y + h]], color);
+    }
+  }
+
+  // 지반
+  plane(0, 0, 380, 516, 0.2, '#e9ece0');
+  CityDalian.draw2D({ ctx, point, plane, cuboid, line, polygon, view }, 12);
+  window.__ready = true;
+</script>
+</html>

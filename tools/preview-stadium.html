@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>梭鱼湾足球场 프리뷰</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #dfe7ea; font-family: system-ui, sans-serif; }
+  #views { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(3, 1fr); }
+  canvas { display: block; width: 100%; height: 100%; }
+  .tag { position: absolute; color: #23343b; font-size: 12px; font-weight: 600; padding: 4px 8px; }
+</style>
+<div id="views"></div>
+<script src="../vendor/three.min.js"></script>
+<script src="../city-dalian.js"></script>
+<script>
+  // 축구장 단독 검수 — 마을 플랜 없이 랜드마크만 렌더.
+  // ?shot=N 이면 그 한 컷만 크게(1000×640) 렌더한다.
+  const plan = { buildings: [], facilities: [], places: [], roads: [], water: { x: 0, z: 0, w: 30, d: 516 } };
+  const CX = -248, CZ = -150;
+  // az: 카메라 방위(라디안, 0 = +x 동쪽), dist: 수평 거리, elev: 카메라 높이
+  const shots = [
+    { name: '동쪽 3/4 · 전체', az: 0.62, dist: 132, elev: 66, target: [CX, 12, CZ] },
+    { name: '정면 · 이름 간판', az: 0.10, dist: 82, elev: 16, target: [CX + 20, 8, CZ] },
+    { name: '지붕 · 오쿨루스', az: 1.10, dist: 74, elev: 96, target: [CX, 6, CZ] },
+    { name: '서쪽 · 파도 지붕', az: 2.95, dist: 108, elev: 44, target: [CX, 12, CZ] },
+    { name: '그라운드 안', az: 0.2, dist: 34, elev: 9, target: [CX, 6, CZ] },
+    { name: '위 단 · 좌석/스크린', az: 1.6, dist: 46, elev: 22, target: [CX - 10, 12, CZ] }
+  ];
+  const only = new URLSearchParams(location.search).get('shot');
+  const W = only !== null ? 1000 : 520, H = only !== null ? 640 : 300;
+  const host = document.getElementById('views');
+  if (only !== null) {
+    host.style.gridTemplateColumns = '1fr';
+    host.style.gridTemplateRows = '1fr';
+  }
+  const list = only !== null ? [shots[Number(only) % shots.length]] : shots;
+  list.forEach((shot) => {
+    const wrap = document.createElement('div');
+    wrap.style.position = 'relative';
+    host.appendChild(wrap);
+    const canvas = document.createElement('canvas');
+    wrap.appendChild(canvas);
+    const tag = document.createElement('div');
+    tag.className = 'tag'; tag.textContent = shot.name;
+    wrap.appendChild(tag);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(1);
+    renderer.setSize(W, H, false);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#dfe7ea');
+    const camera = new THREE.PerspectiveCamera(40, W / H, 1, 3000);
+    camera.position.set(
+      shot.target[0] + Math.cos(shot.az) * shot.dist,
+      shot.elev,
+      shot.target[2] + Math.sin(shot.az) * shot.dist
+    );
+    camera.lookAt(new THREE.Vector3(...shot.target));
+    scene.add(new THREE.HemisphereLight('#ffffff', '#7d8a80', 0.95));
+    const sun = new THREE.DirectionalLight('#fff6e4', 0.85);
+    sun.position.set(120, 220, 160);
+    scene.add(sun);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ color: '#c9d2cc' }));
+    ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02;
+    scene.add(ground);
+
+    const controller = CityDalian.create(THREE, {}, plan);
+    scene.add(controller.group);
+    controller.update(12);
+    renderer.render(scene, camera);
+  });
+  window.__ready = true;
+</script>
+</html>
