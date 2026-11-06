@@ -592,9 +592,25 @@
       bowl.position.set(cx, 0, cz);
       group.add(bowl);
 
+      // 梭鱼湾 — 삼면이 바다: 경기장의 서·남·북을 감싸는 만(灣)
+      var seaMat = mat('suoyuwan-sea', '#5f97a9', { roughness: 0.28, metalness: 0.06 });
+      box(760, 0.5, 900, seaMat, cx - 441, -0.62, cz);          // 서쪽 만
+      box(122, 0.5, 300, seaMat, cx, -0.62, cz - 209);          // 북쪽 만
+      box(122, 0.5, 300, seaMat, cx, -0.62, cz + 209);          // 남쪽 만
+
       // 대지(마을 지반 밖 서쪽 매립지) — 경기장이 허공에 뜨지 않도록
       box(122, 0.18, 118, mat('stadium-site', '#c6c8bf'), cx, 0.09, cz);
       box(112, 0.2, 108, mat('stadium-plaza', '#d6d3c6'), cx, 0.16, cz);
+
+      // 해안 난간 — 동쪽만 육지와 이어진다
+      var quayMat = mat('suoyuwan-quay', '#cfc9b8', { roughness: 0.85 });
+      var quayRail = mat('suoyuwan-quay-rail', '#e2ddcd', { roughness: 0.7 });
+      box(0.55, 1.05, 118, quayMat, cx - 61, 0.78, cz);
+      box(0.3, 0.22, 118, quayRail, cx - 61, 1.41, cz);
+      box(122, 1.05, 0.55, quayMat, cx, 0.78, cz - 59);
+      box(122, 0.22, 0.3, quayRail, cx, 1.41, cz - 59);
+      box(122, 1.05, 0.55, quayMat, cx, 0.78, cz + 59);
+      box(122, 0.22, 0.3, quayRail, cx, 1.41, cz + 59);
 
       // 잔디 + 골대
       var pitchTex = pitchCanvas();
@@ -990,7 +1006,10 @@
         api.ctx.beginPath(); api.ctx.fillStyle = '#e8ecee';
         api.ctx.arc(tp[0], tp[1], Math.max(3, api.view.scale * 3.2), 0, Math.PI * 2); api.ctx.fill();
       } else {
-        // 梭鱼湾: 초타원 그릇 — 지붕(흰색) → 파사드(짙은 블루) → 그라운드
+        // 梭鱼湾: 삼면의 바다 → 대지 → 초타원 그릇(지붕 → 파사드 → 그라운드)
+        plane(e.x - 127, e.z, 132, 344, 0.06, '#7fb0c0');
+        plane(e.x, e.z - 115, 122, 112, 0.06, '#7fb0c0');
+        plane(e.x, e.z + 115, 122, 112, 0.06, '#7fb0c0');
         plane(e.x, e.z, 122, 118, 0.48, '#c9ccc2');
         plane(e.x, e.z, 112, 108, 0.50, '#d6d3c6');
         [[57.0, 49.6, '#eef2f4', 0.60], [55.2, 48.1, '#f7f9fa', 0.61],
@@ -1046,6 +1065,8 @@
       var half = e.kind === 'bridge' ? e.span / 2 : (e.kind === 'stadium' ? 62 : 28);
       var y = e.kind === 'tower' ? e.bodyH + e.mastH : (e.kind === 'bridge' ? e.towerH : 23);
       out.push({ x: e.x, z: e.z, half: half, y: y });
+      // 梭鱼湾 삼면의 바다까지 프레임에 들어오게
+      if (e.kind === 'stadium') out.push({ x: e.x - 96, z: e.z, half: 96, y: 3 });
     });
     return out;
   }

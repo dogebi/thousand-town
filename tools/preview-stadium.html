@@ -23,7 +23,8 @@
     { name: '지붕 · 오쿨루스', az: 1.10, dist: 74, elev: 96, target: [CX, 6, CZ] },
     { name: '서쪽 · 파도 지붕', az: 2.95, dist: 108, elev: 44, target: [CX, 12, CZ] },
     { name: '그라운드 안', az: 0.2, dist: 34, elev: 9, target: [CX, 6, CZ] },
-    { name: '위 단 · 좌석/스크린', az: 1.6, dist: 46, elev: 22, target: [CX - 10, 12, CZ] }
+    { name: '위 단 · 좌석/스크린', az: 1.6, dist: 46, elev: 22, target: [CX - 10, 12, CZ] },
+    { name: '공중 · 삼면의 바다', az: 2.35, dist: 210, elev: 170, target: [CX - 40, 4, CZ] }
   ];
   const only = new URLSearchParams(location.search).get('shot');
   const W = only !== null ? 1000 : 520, H = only !== null ? 640 : 300;
@@ -59,7 +60,8 @@
     const sun = new THREE.DirectionalLight('#fff6e4', 0.85);
     sun.position.set(120, 220, 160);
     scene.add(sun);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ color: '#c9d2cc' }));
+    // 마을 지반(±190 × ±258)만 깔아 둔다 — 그 밖은 梭鱼湾의 바다가 보이도록
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(380, 516), new THREE.MeshStandardMaterial({ color: '#c9d2cc' }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02;
     scene.add(ground);
 
