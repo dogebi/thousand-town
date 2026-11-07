@@ -61,7 +61,7 @@
     {
       id: 'suoyuwan', name: '梭鱼湾足球场', kind: 'stadium',
       x: -248, z: -150, w: 110, d: 96, seats: 63000,
-      note: '6.3万석 · 26.5ha · 13.6만㎡ · ETFE 4만㎡/9색 7823판 · 2.2km 慢跑坡道 · 三面环海 · 2023.04.29 개장 · 大连英博 홈'
+      note: '6.3万석 · 26.5ha · 13.6만㎡ · ETFE 4만㎡/9색 7823판 · 2.2km 慢跑坡道 · 훈련장 2면+부속동 · 三面环海 · 2023.04.29 개장 · 大连英博 홈'
     }
   ];
 
@@ -592,22 +592,44 @@
       // 梭鱼湾 — 삼면이 바다: 경기장의 서·남·북을 감싸는 만(灣)
       var seaMat = mat('suoyuwan-sea', '#5f97a9', { roughness: 0.28, metalness: 0.06 });
       box(760, 0.5, 900, seaMat, cx - 441, -0.62, cz);          // 서쪽 만
-      box(122, 0.5, 300, seaMat, cx, -0.62, cz - 209);          // 북쪽 만
+      box(122, 0.5, 300, seaMat, cx, -0.62, cz - 284);          // 북쪽 만
       box(122, 0.5, 300, seaMat, cx, -0.62, cz + 209);          // 남쪽 만
 
-      // 대지(마을 지반 밖 서쪽 매립지) — 경기장이 허공에 뜨지 않도록
+      // 대지(마을 지반 밖 매립지) — 경기장이 허공에 뜨지 않도록
       box(122, 0.18, 118, mat('stadium-site', '#b9bcb6'), cx, 0.09, cz);
       box(112, 0.2, 108, mat('stadium-plaza', '#cbcdc6'), cx, 0.16, cz);
+      // 북측 매립지 — 백과의 '동측 훈련장 2면 + 부속동'을 마을 쪽(동)에 자리가 없어 북측에 배치.
+      // x 를 -196 까지로 줄여 z=-245 환상도로(x -194.5~-169.5)와 겹치지 않게 한다.
+      box(113, 0.18, 76, mat('stadium-site', '#b9bcb6'), cx - 4.5, 0.09, cz - 96.5);
+      box(107, 0.2, 70, mat('stadium-plaza', '#cbcdc6'), cx - 4.5, 0.16, cz - 96.5);
 
       // 해안 난간 — 동쪽만 육지와 이어진다
       var quayMat = mat('suoyuwan-quay', '#cfc9b8', { roughness: 0.85 });
       var quayRail = mat('suoyuwan-quay-rail', '#e2ddcd', { roughness: 0.7 });
-      box(0.55, 1.05, 118, quayMat, cx - 61, 0.78, cz);
-      box(0.3, 0.22, 118, quayRail, cx - 61, 1.41, cz);
-      box(122, 1.05, 0.55, quayMat, cx, 0.78, cz - 59);
-      box(122, 0.22, 0.3, quayRail, cx, 1.41, cz - 59);
+      box(0.55, 1.05, 193, quayMat, cx - 61, 0.78, cz - 96.5);
+      box(0.3, 0.22, 193, quayRail, cx - 61, 1.41, cz - 96.5);
+      box(113, 1.05, 0.55, quayMat, cx - 4.5, 0.78, cz - 134);
+      box(113, 0.22, 0.3, quayRail, cx - 4.5, 1.41, cz - 134);
       box(122, 1.05, 0.55, quayMat, cx, 0.78, cz + 59);
       box(122, 0.22, 0.3, quayRail, cx, 1.41, cz + 59);
+
+      // 훈련장 2면(천연잔디, 105×68) + 부속동(1700㎡)
+      var trainGreen = mat('stadium-training', '#3f7f4a', { roughness: 0.92 });
+      var trainLine = mat('stadium-training-line', '#e9f0e7', { roughness: 0.8 });
+      [[cx - 24, cz - 96], [cx + 26, cz - 96]].forEach(function (pc) {
+        box(44, 0.24, 28.6, trainGreen, pc[0], 0.34, pc[1]);
+        var lx = pc[0], lz = pc[1];
+        box(0.16, 0.02, 28, trainLine, lx, 0.48, lz);
+        box(44, 0.02, 0.16, trainLine, lx, 0.48, lz - 14);
+        box(44, 0.02, 0.16, trainLine, lx, 0.48, lz + 14);
+        box(0.16, 0.02, 28, trainLine, lx - 21.6, 0.48, lz);
+        box(0.16, 0.02, 28, trainLine, lx + 21.6, 0.48, lz);
+        box(3.6, 0.9, 0.14, mat('train-goal', '#f2f5f2'), lx - 21.8, 0.95, lz);
+        box(3.6, 0.9, 0.14, mat('train-goal', '#f2f5f2'), lx + 21.8, 0.95, lz);
+      });
+      box(17, 5.4, 14, mat('stadium-annex', '#d3d5ce'), cx + 40, 2.86, cz - 118);
+      box(17.6, 0.5, 14.6, mat('stadium-annex-roof', '#b9bcb4'), cx + 40, 5.8, cz - 118);
+      sign('训练场', cx - 4.5, 4.6, cz - 132.5, 9, 2.2, 0, '#f6f1e4', '#2f4a58');
 
       // 잔디 + 골대
       var pitchTex = pitchCanvas();
@@ -1014,10 +1036,15 @@
       } else {
         // 梭鱼湾: 삼면의 바다 → 대지 → 초타원 그릇(지붕 → 파사드 → 그라운드)
         plane(e.x - 127, e.z, 132, 344, 0.06, '#7fb0c0');
-        plane(e.x, e.z - 115, 122, 112, 0.06, '#7fb0c0');
+        plane(e.x, e.z - 190, 122, 112, 0.06, '#7fb0c0');
         plane(e.x, e.z + 115, 122, 112, 0.06, '#7fb0c0');
         plane(e.x, e.z, 122, 118, 0.48, '#c9ccc2');
         plane(e.x, e.z, 112, 108, 0.50, '#d6d3c6');
+        // 북측 훈련장 2면 + 부속동
+        plane(e.x - 4.5, e.z - 96.5, 113, 76, 0.47, '#c9ccc2');
+        plane(e.x - 24, e.z - 96, 44, 28.6, 0.55, '#3f7f4a');
+        plane(e.x + 26, e.z - 96, 44, 28.6, 0.55, '#3f7f4a');
+        plane(e.x + 40, e.z - 118, 17, 14, 0.58, '#d3d5ce');
         [[57.0, 49.6, '#eef2f4', 0.60], [55.2, 48.1, '#f7f9fa', 0.61],
          [52.4, 45.6, '#1a3350', 0.62], [40.4, 35.0, '#24313d', 0.63]].forEach(function (rg) {
           var pts = [];
