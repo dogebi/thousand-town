@@ -67,7 +67,13 @@
 
     const controller = CityDalian.create(THREE, {}, plan);
     scene.add(controller.group);
-    controller.update(12);
+    const dark = new URLSearchParams(location.search).get('night') === '1';
+    if (dark) {
+      scene.background = new THREE.Color('#0d1620');
+      scene.children.forEach(o => { if (o.isHemisphereLight) o.intensity = 0.35; if (o.isDirectionalLight) o.intensity = 0.18; });
+      ground.material.color.set('#2a3238');
+    }
+    controller.update(12, dark ? { night: 1 } : null, dark ? 79200 : 43200);
     renderer.render(scene, camera);
   });
   window.__ready = true;

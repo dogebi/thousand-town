@@ -207,7 +207,7 @@
     var cableMat = mat('bridge-cable', '#f0f2f0', { metalness: 0.5, roughness: 0.4 });
     var towerConcrete = mat('tower-concrete', '#dedbd0');
     // 관중석 — 회색·파랑 6색을 저역→고역으로渐变退晕 (위챗 백과 '看台座椅设计')
-    var seatRamp = ['#123a5c', '#1c5a86', '#2f7fa8', '#5d97b4', '#9db6c2', '#cfd6d8']
+    var seatRamp = ['#1c4f7c', '#2a6b9c', '#3d86b4', '#6fa3c0', '#a8bec9', '#d8dcdc']
       .map(function (hex, i) { return mat('seat-' + i, hex, { side: T.DoubleSide }); });
 
     // 星海广场 ─────────────────────────────────────────────────────────
@@ -476,7 +476,8 @@
       return tex;
     }
     function ownMat(m) { owned.push(m); return m; }
-    var bowl = group;          // 축구장 링 지오메트리는 로컬 좌표로 만들어 여기에 담는다
+    var bowl = group;
+    var stadFacadeMat = null, stadLedMat = null, stadClereMat = null, stadSeaTex = null, stadRoofMat = null;          // 축구장 링 지오메트리는 로컬 좌표로 만들어 여기에 담는다
     function band(seg, cb, material) {
       var mesh = new T.Mesh(ringBandGeo(seg, cb), material);
       mesh.castShadow = true; mesh.receiveShadow = true;
@@ -561,16 +562,16 @@
     // PTFE 지붕 — 다이아몬드 케이블 넷(방사 케이블 + 동심 링)
     function roofCanvas() {
       return canvasTex(512, 512, function (g, W, H) {
-        g.fillStyle = '#f2f5f5'; g.fillRect(0, 0, W, H);
-        var step = 46;
-        g.strokeStyle = 'rgba(52,68,82,.22)'; g.lineWidth = 1.8;
-        for (var d = -H; d < W + H; d += step) {
-          g.beginPath(); g.moveTo(d, 0); g.lineTo(d + H, H); g.stroke();
-          g.beginPath(); g.moveTo(d, 0); g.lineTo(d - H, H); g.stroke();
+        g.fillStyle = '#f4f7f7'; g.fillRect(0, 0, W, H);
+        var ribs = 36;
+        for (var i = 0; i < ribs; i++) {
+          var x = (i / ribs) * W;
+          g.strokeStyle = 'rgba(48,64,78,.16)'; g.lineWidth = 1.8;
+          g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 6, H); g.stroke();
         }
-        for (var r = 1; r < 9; r++) {
-          var y = (r / 9) * H;
-          g.strokeStyle = 'rgba(52,68,82,.12)'; g.lineWidth = 1.4;
+        for (var r = 1; r <= 5; r++) {
+          var y = (r / 6) * H;
+          g.strokeStyle = 'rgba(48,64,78,.10)'; g.lineWidth = 1.4;
           g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
         }
         var grd = g.createLinearGradient(0, 0, 0, H);
@@ -590,7 +591,28 @@
       group.add(bowl);
 
       // 梭鱼湾 — 삼면이 바다: 경기장의 서·남·북을 감싸는 만(灣)
-      var seaMat = mat('suoyuwan-sea', '#5f97a9', { roughness: 0.28, metalness: 0.06 });
+      var seaMat = mat('suoyuwan-sea', '#ffffff', { roughness: 0.24, metalness: 0.1 });
+      var seaTex = canvasTex(256, 256, function (g, W, H) {
+        g.fillStyle = '#5f97a9'; g.fillRect(0, 0, W, H);
+        for (var i = 0; i < 44; i++) {
+          var y = (i * 53) % H;
+          g.strokeStyle = 'rgba(232,246,250,' + (0.03 + (i % 4) * 0.012).toFixed(3) + ')';
+          g.lineWidth = 1 + (i % 3);
+          g.beginPath();
+          for (var x = 0; x <= W; x += 16) {
+            var yy = y + Math.sin((x / W) * Math.PI * 4 + i) * 4;
+            if (x) g.lineTo(x, yy); else g.moveTo(x, yy);
+          }
+          g.stroke();
+        }
+      });
+      if (seaTex) {
+        seaTex.wrapS = seaTex.wrapT = T.RepeatWrapping;
+        seaTex.repeat.set(3, 4);
+        seaMat.map = seaTex;
+        seaMat.needsUpdate = true;
+        stadSeaTex = seaTex;
+      }
       box(760, 0.5, 900, seaMat, cx - 441, -0.62, cz);          // 서쪽 만
       box(122, 0.5, 300, seaMat, cx, -0.62, cz - 284);          // 북쪽 만
       box(122, 0.5, 300, seaMat, cx, -0.62, cz + 209);          // 남쪽 만
@@ -654,7 +676,7 @@
       });
 
       // 관람석 2단 — 좌석은 회색·파랑 6색이 저역에서 고역으로漸变退晕
-      var riserMat = mat('stadium-riser', '#1c2a38', { side: T.DoubleSide });
+      var riserMat = mat('stadium-riser', '#26333f', { side: T.DoubleSide });
       function tier(rx0, rz0, rows, tread, rise, y0, t0, t1) {
         for (var r = 0; r < rows; r++) {
           var rIn = rx0 + r * tread, rOut = rIn + tread;
@@ -693,10 +715,11 @@
         var p = sup(t, L_OUT_RX + 0.9, L_OUT_RZ + 0.9);
         return [p[0], L_TOP + 0.6, p[1], p[0], L_TOP + 0.16, p[1]];
       }, mat('stadium-warm', '#ffe6bd', { emissive: '#ffcd8a', emissiveIntensity: 0.8 }));
+      stadLedMat = mat('stadium-led', '#1d6fa8', { emissive: '#2f9ad6', emissiveIntensity: 0.9 });
       band(SSEG, function (t) {
         var p = sup(t, L_OUT_RX - 1.2, L_OUT_RZ - 1.2);
         return [p[0], L_TOP + 0.06, p[1], p[0], L_TOP - 1.05, p[1]];
-      }, mat('stadium-led', '#1d6fa8', { emissive: '#2f9ad6', emissiveIntensity: 0.9 }));
+      }, stadLedMat);
 
       // 위 단 배면 ~ 파사드 상단
       band(SSEG, function (t) {
@@ -716,6 +739,7 @@
         var p = facadePoint(t, v);
         return [p[0], p[1], p[2]];
       }, facadeMat);
+      stadFacadeMat = facadeMat;
 
       // 나선 램프 밴드(2.2km) — 파사드를 감아 도는 흰 띠 두 줄 + 처마
       var rampMat = mat('stadium-ramp', '#f2f4f5', { metalness: 0.18, roughness: 0.5 });
@@ -748,13 +772,13 @@
         return [p[0], FA_BASE + plinthH, p[1], p[0], FA_BASE - 0.5, p[1]];
       }, mat('stadium-plinth', '#6d737a', { metalness: 0.35, roughness: 0.5 }));
       var finMat = mat('stadium-fin', '#e9e8e2', { metalness: 0.1, roughness: 0.62 });
-      var finGeo = new T.BoxGeometry(0.8, plinthH - 0.25, 0.6);
-      var fins = new T.InstancedMesh(finGeo, finMat, 56);
+      var finGeo = new T.BoxGeometry(0.42, plinthH - 0.25, 0.34);
+      var fins = new T.InstancedMesh(finGeo, finMat, 72);
       var dummy = new T.Object3D();
-      for (i = 0; i < 56; i++) {
-        var fa = (i / 56) * Math.PI * 2;
-        var fp = sup(fa, r0x + 1.4, r0z + 1.4);
-        var fn = supNormal(fa, r0x + 1.4, r0z + 1.4);
+      for (i = 0; i < 72; i++) {
+        var fa = (i / 72) * Math.PI * 2;
+        var fp = sup(fa, r0x + 1.05, r0z + 1.05);
+        var fn = supNormal(fa, r0x + 1.05, r0z + 1.05);
         dummy.position.set(cx + fp[0], FA_BASE + (plinthH - 0.25) / 2 + 0.1, cz + fp[1]);
         dummy.rotation.set(0, -Math.atan2(fn[1], fn[0]) + Math.PI / 2, 0);
         dummy.scale.set(1, 1, 1);
@@ -773,17 +797,48 @@
       // 파도 지붕(PTFE) — 안쪽 고리에서 바깥으로 1.35승으로 들려 올라간다
       var roofTexReal = roofCanvas();
       var roofMatReal = ownMat(new T.MeshStandardMaterial({
-        map: roofTexReal, color: '#f2f5f6', roughness: 0.66, metalness: 0.04, side: T.DoubleSide
+        map: roofTexReal, color: '#f2f5f6', roughness: 0.66, metalness: 0.04,
+        emissive: '#fff4e2', emissiveIntensity: 0, side: T.DoubleSide
       }));
-      surface(SFSEG, 12, function (t, f) {
+      stadRoofMat = roofMatReal;
+      var roofMesh = surface(SFSEG, 12, function (t, f) {
         var p = roofPoint(t, f);
         return [p[0], p[1], p[2]];
       }, roofMatReal);
+      roofMesh.castShadow = false;      // 지붕 그림자가 관중석을 검게 덮지 않게
+
+      // 지붕 케이블 트러스 — 방사 44본 + 동심 4링 (지붕 면 1.2m 아래)
+      var trussMat = mat('stadium-truss', '#c2c8cc', { metalness: 0.55, roughness: 0.42 });
+      var SPOKES = 44, TSEG = 6;
+      var truss = new T.InstancedMesh(new T.BoxGeometry(0.18, 0.18, 1), trussMat, SPOKES * TSEG);
+      var tdum = new T.Object3D(), tk = 0;
+      for (var sp = 0; sp < SPOKES; sp++) {
+        for (var sg = 0; sg < TSEG; sg++) {
+          var f0 = 0.06 + (sg / TSEG) * 0.9, f1 = 0.06 + ((sg + 1) / TSEG) * 0.9;
+          var pa = roofPoint((sp / SPOKES) * Math.PI * 2, f0);
+          var pb = roofPoint((sp / SPOKES) * Math.PI * 2, f1);
+          var A = new T.Vector3(pa[0], pa[1] - 1.2 * STAD, pa[2]);
+          var B = new T.Vector3(pb[0], pb[1] - 1.2 * STAD, pb[2]);
+          tdum.position.copy(A).lerp(B, 0.5);
+          tdum.lookAt(B);
+          tdum.scale.set(1, 1, A.distanceTo(B));
+          tdum.updateMatrix();
+          truss.setMatrixAt(tk++, tdum.matrix);
+        }
+      }
+      truss.instanceMatrix.needsUpdate = true;
+      bowl.add(truss);
+      [0.24, 0.44, 0.64, 0.84].forEach(function (f) {
+        band(SFSEG, function (t) {
+          var q = roofPoint(t, f);
+          return [q[0], q[1] - 1.05 * STAD, q[2], q[0], q[1] - 1.35 * STAD, q[2]];
+        }, trussMat).castShadow = false;
+      });
 
       // 외곽 파시아 + 내부 압축링 + 클레어스토리(빛나는 띠)
       band(SFSEG, function (t) {
         var p = roofOuter(t), y = roofY(t, 1);
-        return [p[0], y, p[1], p[0], y - 3.4 * STAD, p[1]];
+        return [p[0], y, p[1], p[0], y - 2.2 * STAD, p[1]];
       }, mat('stadium-fascia', '#fbfcfc', { metalness: 0.2, roughness: 0.4 }));
       band(SSEG, function (t) {
         var p = sup(t, ROOF_IN_RX, ROOF_IN_RZ);
@@ -792,7 +847,7 @@
       band(SSEG, function (t) {
         var p = sup(t, ROOF_IN_RX - 0.1, ROOF_IN_RZ - 0.1);
         return [p[0], ROOF_IN_Y - 0.2 * STAD, p[1], p[0], ROOF_IN_Y - 2.4 * STAD, p[1]];
-      }, mat('stadium-clerestory', '#dff0f7', {
+      }, stadClereMat = mat('stadium-clerestory', '#dff0f7', {
         emissive: '#cfe6f2', emissiveIntensity: 0.4, roughness: 0.3,
         transparent: true, opacity: 0.78, side: T.DoubleSide
       })).castShadow = false;
@@ -942,9 +997,39 @@
     }
     vehicles.forEach(function (v) { placeVehicle(v, 0); });
 
-    function update(time) {
+    // daySeconds(0~86400)로 밤 정도를 추정 — lighting.night 가 있으면 그쪽을 우선한다.
+    function nightFactor(lighting, daySeconds) {
+      if (lighting && Number.isFinite(lighting.night)) {
+        return Math.max(0, Math.min(1, lighting.night));
+      }
+      if (!Number.isFinite(daySeconds)) return 0;
+      var h = (((daySeconds % 86400) + 86400) % 86400) / 3600;
+      if (h < 5.5 || h > 19.5) return 1;
+      if (h < 7) return (7 - h) / 1.5;
+      if (h > 18) return (h - 18) / 1.5;
+      return 0;
+    }
+
+    function update(time, lighting, daySeconds) {
       var t = Number.isFinite(time) ? time : 0;
       for (var i = 0; i < vehicles.length; i++) placeVehicle(vehicles[i], t);
+      if (stadSeaTex) {
+        stadSeaTex.offset.x = (t * 0.0045) % 1;
+        stadSeaTex.offset.y = (t * 0.0022) % 1;
+      }
+      var night = nightFactor(lighting, daySeconds);
+      if (stadFacadeMat) {
+        // 주간 0.1, 야간 1.4 — 泛光은 12초 주기로 색이 흐른다(炫彩叠浪)
+        stadFacadeMat.emissiveIntensity = 0.1 + night * 1.3;
+        if (night > 0.05 && stadFacadeMat.emissive) {
+          // 立面은 '海洋蓝' 계열 안에서만 흐른다(초록으로 넘어가지 않게 hue 0.52~0.70)
+          var hue = 0.52 + 0.09 * (1 + Math.sin(t * 0.08));
+          stadFacadeMat.emissive.setHSL(hue, 0.68, 0.13 + night * 0.12);
+        }
+      }
+      if (stadLedMat) stadLedMat.emissiveIntensity = 0.6 + night * 1.6;
+      if (stadRoofMat) stadRoofMat.emissiveIntensity = night * 0.45;   // 顶棚 조명(클라우드 효과)
+      if (stadClereMat) stadClereMat.emissiveIntensity = 0.3 + night * 1.2;
     }
 
     function getInfo() {
