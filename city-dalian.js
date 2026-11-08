@@ -594,6 +594,8 @@
       box(760, 0.5, 900, seaMat, cx - 441, -0.62, cz);          // 서쪽 만
       box(122, 0.5, 300, seaMat, cx, -0.62, cz - 284);          // 북쪽 만
       box(122, 0.5, 300, seaMat, cx, -0.62, cz + 209);          // 남쪽 만
+      // 훈련장 매립지와 마을 지반 사이 6m 수로(빈틈 메우기, 환상도로 끝단은 그대로)
+      box(6, 0.5, 75, seaMat, cx + 55, -0.62, cz - 96.5);
 
       // 대지(마을 지반 밖 매립지) — 경기장이 허공에 뜨지 않도록
       box(122, 0.18, 118, mat('stadium-site', '#b9bcb6'), cx, 0.09, cz);
@@ -771,7 +773,7 @@
       // 파도 지붕(PTFE) — 안쪽 고리에서 바깥으로 1.35승으로 들려 올라간다
       var roofTexReal = roofCanvas();
       var roofMatReal = ownMat(new T.MeshStandardMaterial({
-        map: roofTexReal, color: '#e4e9ec', roughness: 0.66, metalness: 0.05, side: T.DoubleSide
+        map: roofTexReal, color: '#f2f5f6', roughness: 0.66, metalness: 0.04, side: T.DoubleSide
       }));
       surface(SFSEG, 12, function (t, f) {
         var p = roofPoint(t, f);
@@ -1037,6 +1039,7 @@
         // 梭鱼湾: 삼면의 바다 → 대지 → 초타원 그릇(지붕 → 파사드 → 그라운드)
         plane(e.x - 127, e.z, 132, 344, 0.06, '#7fb0c0');
         plane(e.x, e.z - 190, 122, 112, 0.06, '#7fb0c0');
+        plane(e.x + 55, e.z - 96.5, 6, 75, 0.06, '#7fb0c0');
         plane(e.x, e.z + 115, 122, 112, 0.06, '#7fb0c0');
         plane(e.x, e.z, 122, 118, 0.48, '#c9ccc2');
         plane(e.x, e.z, 112, 108, 0.50, '#d6d3c6');
