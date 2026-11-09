@@ -1121,34 +1121,56 @@
         api.ctx.beginPath(); api.ctx.fillStyle = '#e8ecee';
         api.ctx.arc(tp[0], tp[1], Math.max(3, api.view.scale * 3.2), 0, Math.PI * 2); api.ctx.fill();
       } else {
-        // 梭鱼湾: 삼면의 바다 → 대지 → 초타원 그릇(지붕 → 파사드 → 그라운드)
+        // 梭鱼湾: 바다 → 대지 → 초타원 그릇. 2D 에서도 지붕·램프 띠·관중석·잔디가 읽히게.
+        function supPts(rx, rz, y, n) {
+          var pts = [];
+          var steps = n || 48;
+          for (var k = 0; k < steps; k++) {
+            var q = supPlan((k / steps) * Math.PI * 2, rx, rz);
+            pts.push([e.x + q[0], e.z + q[1], y]);
+          }
+          return pts;
+        }
+        // 삼면의 바다 + 6m 수로
         plane(e.x - 127, e.z, 132, 344, 0.06, '#7fb0c0');
         plane(e.x, e.z - 190, 122, 112, 0.06, '#7fb0c0');
-        plane(e.x + 55, e.z - 96.5, 6, 75, 0.06, '#7fb0c0');
         plane(e.x, e.z + 115, 122, 112, 0.06, '#7fb0c0');
+        plane(e.x + 55, e.z - 96.5, 6, 75, 0.06, '#7fb0c0');
+        // 대지 + 북측 매립지(훈련장 2면 + 부속동)
         plane(e.x, e.z, 122, 118, 0.48, '#c9ccc2');
         plane(e.x, e.z, 112, 108, 0.50, '#d6d3c6');
-        // 북측 훈련장 2면 + 부속동
         plane(e.x - 4.5, e.z - 96.5, 113, 76, 0.47, '#c9ccc2');
         plane(e.x - 24, e.z - 96, 44, 28.6, 0.55, '#3f7f4a');
         plane(e.x + 26, e.z - 96, 44, 28.6, 0.55, '#3f7f4a');
         plane(e.x + 40, e.z - 118, 17, 14, 0.58, '#d3d5ce');
-        [[57.0, 49.6, '#eef2f4', 0.60], [55.2, 48.1, '#f7f9fa', 0.61],
-         [52.4, 45.6, '#1a3350', 0.62], [40.4, 35.0, '#24313d', 0.63]].forEach(function (rg) {
-          var pts = [];
-          for (var i3 = 0; i3 < 40; i3++) {
-            var p3 = supPlan((i3 / 40) * Math.PI * 2, rg[0], rg[1]);
-            pts.push([e.x + p3[0], e.z + p3[1], rg[3]]);
-          }
-          polygon(pts, rg[2]);
-        });
-        plane(e.x, e.z, 44.1, 28.6, 0.71, '#3f7d4b');
+        // 지붕(흰) → 지붕 안쪽 → 램프 띠 2줄 → 파사드(블루) → 관중석 2단
+        polygon(supPts(57.0, 49.6, 0.600), '#f4f7f7');
+        polygon(supPts(55.4, 48.3, 0.605), '#e4eaec');
+        polygon(supPts(54.6, 47.6, 0.610), '#f7f9f9');
+        polygon(supPts(52.6, 45.8, 0.615), '#12365c');
+        polygon(supPts(50.6, 44.0, 0.620), '#f2f4f5');
+        polygon(supPts(49.6, 43.1, 0.625), '#0f2f50');
+        polygon(supPts(44.0, 37.6, 0.632), '#2a6b9c');
+        polygon(supPts(38.6, 32.6, 0.638), '#8fb0c3');
+        // 잔디 105×68 + 규격선
+        plane(e.x, e.z, 44.1, 28.6, 0.645, '#3f7d4b');
+        line([[e.x - 22.05, e.z - 14.3, 0.65], [e.x + 22.05, e.z - 14.3, 0.65]], 'rgba(247,251,247,.75)', 0.7);
+        line([[e.x - 22.05, e.z + 14.3, 0.65], [e.x + 22.05, e.z + 14.3, 0.65]], 'rgba(247,251,247,.75)', 0.7);
+        line([[e.x, e.z - 14.3, 0.65], [e.x, e.z + 14.3, 0.65]], 'rgba(247,251,247,.9)', 0.8);
         var cc = [];
-        for (var i4 = 0; i4 < 18; i4++) {
-          var a4 = (i4 / 18) * Math.PI * 2;
-          cc.push([e.x + Math.cos(a4) * 3.84, e.z + Math.sin(a4) * 3.84, 0.73]);
+        for (var i4 = 0; i4 < 20; i4++) {
+          var a4 = (i4 / 20) * Math.PI * 2;
+          cc.push([e.x + Math.cos(a4) * 3.84, e.z + Math.sin(a4) * 3.84, 0.652]);
         }
-        polygon(cc, 'rgba(247,251,247,.8)');
+        polygon(cc, 'rgba(247,251,247,.85)');
+        // 이름 라벨
+        var lp = point(e.x, e.z, 30);
+        api.ctx.save();
+        api.ctx.fillStyle = '#12324a';
+        api.ctx.font = '600 13px "Microsoft YaHei","PingFang SC",sans-serif';
+        api.ctx.textAlign = 'center';
+        api.ctx.fillText('梭鱼湾足球场', lp[0], lp[1]);
+        api.ctx.restore();
       }
     });
     // 전차
